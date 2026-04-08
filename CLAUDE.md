@@ -14,7 +14,7 @@ DOB-MBRL(Disturbance Observer-Based Model-Based RL) — CartPole에서 nominal d
 
 1. **`base/` 디렉토리는 절대 수정 금지.** 사용자가 명시적으로 "base 수정해줘"라고 지시할 때만 허용.
 2. **`base/original/` 내 원본 파일(`train_DOB_core.py`, `Multi_Seed_DOB_Exp.py`)은 절대 수정 금지.**
-3. **모든 코드 변경은 `Cycle_N/` 내에서만 수행.**
+3. **모든 코드 변경은 `cycles/Cycle_N/` 내에서만 수행.**
 4. **하나의 이미지 파일 = 하나의 figure.** `plt.subplots()` 호출 시 반드시 단일 Axes `(1,1)`. subplot 금지.
    - 예외: Cycle 간 비교용 mean±std 오버레이는 단일 Axes에 겹쳐 그리는 것이므로 허용.
 5. **`config.py` 수정은 파일 직접 편집만.** CLI override 없음.

@@ -17,7 +17,7 @@ python run_multi_seed.py --checkpoint-dir ./checkpoints --num-seeds 16
 
 ## Checkpoint 저장
 
-- 경로: `Cycle_N/checkpoints/Champion_Seed{seed}_BestModel.pt`
+- 경로: `cycles/Cycle_N/checkpoints/Champion_Seed{seed}_BestModel.pt`
 - 조건: 최근 10 에피소드 평균 reward ≥ 480 AND 기존 최고 초과 시 저장
 - 파일명에 시드 번호 포함 → 병렬 쓰기 충돌 없음
 
@@ -30,19 +30,19 @@ python run_multi_seed.py --checkpoint-dir ./checkpoints --num-seeds 16
 
 ## 로그 저장 형식
 
-단일 시드: `Cycle_N/logs/seed_{N}_result.pkl`
+단일 시드: `cycles/Cycle_N/logs/seed_{N}_result.pkl`
 ```python
 {'rewards': list[float], 'steps': list[int]}
 ```
 
-멀티 시드: `Cycle_N/results/DOB_MBRL_MultiSeed_Result.pkl`
+멀티 시드: `cycles/Cycle_N/results/DOB_MBRL_MultiSeed_Result.pkl`
 ```python
 {'all_rewards': list[list[float]], 'all_steps': list[list[int]]}
 ```
 
 ## 하이퍼파라미터 수정
 
-`Cycle_N/dob_mbrl/training/config.py`를 직접 편집. CLI override 없음.
+`cycles/Cycle_N/dob_mbrl/training/config.py`를 직접 편집. CLI override 없음.
 수정 후 반드시 `__post_init__` 검증이 통과하는지 확인:
 ```bash
 python -c "from dob_mbrl.training.config import DOBMBRLConfig; DOBMBRLConfig()"

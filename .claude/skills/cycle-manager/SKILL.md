@@ -19,18 +19,18 @@
 ```bash
 bash .claude/skills/cycle-manager/scripts/create_cycle.sh --from base
 # 또는
-bash .claude/skills/cycle-manager/scripts/create_cycle.sh --from Cycle_2
+bash .claude/skills/cycle-manager/scripts/create_cycle.sh --from cycles/Cycle_2
 ```
 
 ## 출력
 
-- `Cycle_N/` 디렉토리 (소스 코드 복사본)
+- `cycles/Cycle_N/` 디렉토리 (소스 코드 복사본)
 - 빈 폴더: `checkpoints/`, `figures/`, `logs/`, `results/`
-- `Cycle_N/CYCLE_REPORT.md` (템플릿)
+- `cycles/Cycle_N/CYCLE_REPORT.md` (템플릿)
 
 ## 검증
 
 ```bash
-ls Cycle_N/dob_mbrl/
-python -c "import sys; sys.path.insert(0,'Cycle_N'); from dob_mbrl.models import QNetwork"
+ls cycles/Cycle_N/dob_mbrl/
+python -c "import sys; sys.path.insert(0,'cycles/Cycle_N'); from dob_mbrl.models import QNetwork"
 ```

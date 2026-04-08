@@ -34,9 +34,13 @@ if [[ ! -d "$SRC" ]]; then
     exit 1
 fi
 
+# Cycle 루트 디렉토리
+CYCLES_ROOT="cycles"
+mkdir -p "$CYCLES_ROOT"
+
 # 다음 Cycle 번호 결정
 MAX_N=0
-for d in Cycle_*/; do
+for d in "$CYCLES_ROOT"/Cycle_*/; do
     if [[ -d "$d" ]]; then
         N="${d//[^0-9]/}"
         if [[ -n "$N" && "$N" -gt "$MAX_N" ]]; then
@@ -45,7 +49,7 @@ for d in Cycle_*/; do
     fi
 done
 NEXT_N=$((MAX_N + 1))
-DEST="Cycle_${NEXT_N}"
+DEST="$CYCLES_ROOT/Cycle_${NEXT_N}"
 
 echo "Creating $DEST from $SRC ..."
 

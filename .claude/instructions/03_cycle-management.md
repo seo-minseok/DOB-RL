@@ -7,9 +7,9 @@
    ```bash
    bash .claude/skills/cycle-manager/scripts/create_cycle.sh --from base
    # 또는
-   bash .claude/skills/cycle-manager/scripts/create_cycle.sh --from Cycle_2
+   bash .claude/skills/cycle-manager/scripts/create_cycle.sh --from cycles/Cycle_2
    ```
-3. Cycle 번호는 기존 Cycle 중 최대 번호 + 1 자동 부여.
+3. Cycle 번호는 `cycles/` 내 기존 Cycle 중 최대 번호 + 1 자동 부여.
 
 ## Cycle 시작점 정책
 
@@ -19,17 +19,20 @@
 
 ## Cycle 폴더 구조
 
+모든 Cycle은 프로젝트 루트의 `cycles/` 디렉토리 아래에 생성된다.
+
 ```
-Cycle_N/
-├── CYCLE_REPORT.md
-├── dob_mbrl/          # (소스에서 복사)
-├── main.py
-├── run_multi_seed.py
-├── scripts/
-├── checkpoints/       # .gitignore (빈 폴더로 생성)
-├── figures/           # .gitignore (빈 폴더로 생성)
-├── logs/              # .gitignore (빈 폴더로 생성)
-└── results/           # .gitignore (빈 폴더로 생성)
+cycles/
+└── Cycle_N/
+    ├── CYCLE_REPORT.md
+    ├── dob_mbrl/          # (소스에서 복사)
+    ├── main.py
+    ├── run_multi_seed.py
+    ├── scripts/
+    ├── checkpoints/       # .gitignore (빈 폴더로 생성)
+    ├── figures/           # .gitignore (빈 폴더로 생성)
+    ├── logs/              # .gitignore (빈 폴더로 생성)
+    └── results/           # .gitignore (빈 폴더로 생성)
 ```
 
 ## CYCLE_REPORT.md 필수 섹션
@@ -54,4 +57,4 @@ Cycle_N/
 1. Cycle의 변경 파일을 base에 병합
 2. base 임포트 테스트 재실행
 3. CYCLE_REPORT.md에 "Base 반영 완료" 기록
-4. 기존 Cycle 영향 없음 — 신규 Cycle부터 변경된 base 적용
+4. 기존 cycles/ 내 Cycle 영향 없음 — 신규 Cycle부터 변경된 base 적용
