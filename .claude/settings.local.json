@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir -p /Users/seominseok/Github/DOB-RL/.claude/instructions)",
+      "Bash(mkdir -p /Users/seominseok/Github/DOB-RL/.claude/skills/cycle-manager/scripts)",
+      "Bash(mkdir -p /Users/seominseok/Github/DOB-RL/.claude/skills/plot-generator/scripts)",
+      "Edit(/.claude/skills/cycle-manager/**)",
+      "Edit(/.claude/skills/plot-generator/**)",
+      "Bash(python -c \"from dob_mbrl.models import QNetwork, ResidualDxNet, NormalizedRBFModel; print\\('models OK'\\)\")",
+      "Bash(python -c \"from dob_mbrl.utils.buffer import ReplayBufferDOB; print\\('buffer OK'\\)\")",
+      "Bash(python -c \"from dob_mbrl.training.trainer import train_DOB_core; print\\('trainer OK'\\)\")",
+      "Bash(python -c \"from dob_mbrl.training.config import DOBMBRLConfig; c = DOBMBRLConfig\\(\\); print\\('config OK, num_episodes=', c.num_episodes\\)\")",
+      "Bash(python main.py --help)",
+      "Bash(chmod +x /Users/seominseok/Github/DOB-RL/.claude/skills/cycle-manager/scripts/create_cycle.sh)"
+    ]
+  }
+}
