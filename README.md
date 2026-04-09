@@ -203,6 +203,82 @@ class DOBMBRLConfig:
 python -c "from dob_mbrl.training.config import DOBMBRLConfig; DOBMBRLConfig()"
 ```
 
+### Ablation 실행
+
+`train_residual_dx_model_dob`의 uncertainty-weighted sampling을 uniform sampling으로 교체하는 ablation.
+
+```bash
+cd cycles/Cycle_N
+python run_multi_seed.py --checkpoint-dir ./checkpoints/ablation --num-seeds 16 --ablation
+```
+
+결과: `cycles/Cycle_N/results/DOB_MBRL_MultiSeed_Result_Ablation.pkl`
+
+#### 메소드 호출 순서
+
+```
+run_multi_seed.py
+└── main()
+    ├── parse_args()                          # --ablation 플래그 파싱 → use_uncertainty_sampling=False
+    └── Pool.map(_run_single, args_list)      # num_seeds개 프로세스 병렬 실행
+        └── _run_single(run_idx, ...)
+            └── train_DOB_core()              # trainer.py — 메인 학습 루프 (시드별 독립 실행)
+                │
+                │  [에피소드마다 반복]
+                │
+                ├── [Phase 1] 모델 학습 & 가상 롤아웃 (warm_start 이후, buffer 충분 시)
+                │   ├── train_residual_dx_model_dob()   # model_learning.py
+                │   │     uniform sampling으로 real_buffer에서 미니배치 추출
+                │   │     → ResidualDxNet을 dhat(DOB 추정값)에 맞춰 SGD 학습
+                │   │
+                │   ├── train_uncertainty_rbf()          # model_learning.py
+                │   │     |Fpinv*e - dx_res|를 타겟으로
+                │   │     → NormalizedRBFModel을 SGD 학습
+                │   │
+                │   └── generate_samples_dob()           # rollout.py
+                │         real_buffer에서 초기 상태 샘플링
+                │         → [스텝마다] uncert_model()로 신뢰도 평가
+                │             신뢰 가능한 상태만 predict_next_obs_dob()로 다음 상태 예측
+                │             → model_buffer.store_batch()로 가상 전이 저장
+                │
+                ├── [Phase 2] 에피소드 리셋
+                │   └── reset_env()                      # cartpole_utils.py
+                │         환경 초기화, dhat = zeros(2) 리셋
+                │
+                ├── [Phase 3] 환경 인터랙션 (스텝마다)
+                │   ├── q_network()                      # 현재 관측 → Q값 → epsilon-greedy 행동 선택
+                │   ├── step_env()                       # cartpole_utils.py — 환경 한 스텝 진행
+                │   ├── step_nominal_cartpole()          # nominal.py — 물리 방정식 기반 예측
+                │   ├── res_net()                        # ResidualDxNet — 잔차 예측 (동결 상태)
+                │   │     dhat = dob_w * dx_res + (1-dob_w) * (FPINV @ e)  ← DOB 온라인 업데이트
+                │   └── real_buffer.store()              # buffer.py — 전이 저장
+                │
+                └── [Phase 4] Q-Network 업데이트 (update_interval 스텝마다)
+                    ├── sample_mixed_minibatch()         # rollout.py
+                    │     real_buffer 20% + model_buffer 80% 혼합 미니배치 구성
+                    ├── target_network()                 # Bellman 타겟 Q값 계산 (no_grad)
+                    ├── q_network()                      # 현재 Q값 예측
+                    │     MSE loss → Adam optimizer → gradient clip(1.0)
+                    └── target_network soft-update       # τ=0.005 로 파라미터 이동 평균 갱신
+```
+
+**각 메소드 역할 요약**
+
+| 메소드 | 파일 | 역할 |
+|---|---|---|
+| `main()` | `run_multi_seed.py` | 인자 파싱, 프로세스 풀 생성, 결과 pkl 저장 |
+| `_run_single()` | `run_multi_seed.py` | 시드별 `DOBMBRLConfig` 생성 후 `train_DOB_core` 호출 |
+| `train_DOB_core()` | `trainer.py` | 전체 학습 루프 — 4개 Phase 조율, checkpoint 저장 |
+| `train_residual_dx_model_dob()` | `model_learning.py` | ResidualDxNet 학습. ablation 시 uniform sampling 사용 |
+| `train_uncertainty_rbf()` | `model_learning.py` | NormalizedRBFModel 학습 (rollout 신뢰도 추정기) |
+| `generate_samples_dob()` | `rollout.py` | 가상 rollout으로 model_buffer 채우기 |
+| `predict_next_obs_dob()` | `dob.py` | nominal + residual + DOB로 다음 상태 예측 |
+| `step_nominal_cartpole()` | `nominal.py` | 물리 방정식 기반 Euler 적분 한 스텝 |
+| `sample_mixed_minibatch()` | `rollout.py` | real 20% + model 80% 혼합 미니배치 반환 |
+| `reset_env()` / `step_env()` | `cartpole_utils.py` | Gymnasium 환경 래퍼 (5-tuple 통합 처리) |
+| `real_buffer.store()` | `buffer.py` | 실제 전이 저장 (obs, act, dhat, uncertainty 포함) |
+| `model_buffer.store_batch()` | `buffer.py` | 가상 전이 배치 저장 |
+
 ---
 
 ## 결과 시각화
