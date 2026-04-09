@@ -118,6 +118,64 @@ def plot_multi_seed(results_path: str, figures_dir: str, target_score: float = 4
     save_figure(fig, os.path.join(figures_dir, 'multiseed_mean_std.png'))
 
 
+def plot_compare(results_dir: str, figures_dir: str, target_score: float = 480.0):
+    """Baseline vs Ablation mean±std 오버레이 비교 figure."""
+    baseline_path = os.path.join(results_dir, 'DOB_MBRL_MultiSeed_Result.pkl')
+    ablation_path = os.path.join(results_dir, 'DOB_MBRL_MultiSeed_Result_Ablation.pkl')
+
+    with open(baseline_path, 'rb') as f:
+        base_data = pickle.load(f)
+    with open(ablation_path, 'rb') as f:
+        abl_data = pickle.load(f)
+
+    def interpolate(data):
+        all_rewards = data['all_rewards']
+        all_steps   = data['all_steps']
+        num_runs    = len(all_rewards)
+        max_step    = max(max(s) for s in all_steps if s)
+        common      = np.linspace(0, max_step, 1000)
+        interp      = np.full((num_runs, 1000), np.nan)
+        for i in range(num_runs):
+            x = np.array([0] + list(all_steps[i]),   dtype=np.float64)
+            y = np.array([0] + list(all_rewards[i]), dtype=np.float64)
+            _, uid = np.unique(x, return_index=True)
+            x, y = x[uid], y[uid]
+            if len(x) < 2:
+                continue
+            vals = np.interp(common, x, y, left=np.nan, right=np.nan)
+            vals[common > x[-1]] = y[-1]
+            interp[i] = vals
+        return common, np.nanmean(interp, axis=0), np.nanstd(interp, axis=0)
+
+    base_x, base_mean, base_std = interpolate(base_data)
+    abl_x,  abl_mean,  abl_std  = interpolate(abl_data)
+
+    os.makedirs(figures_dir, exist_ok=True)
+
+    fig, ax = plt.subplots(1, 1, figsize=(10, 6), facecolor='white')
+
+    ax.fill_between(base_x, base_mean - base_std, base_mean + base_std,
+                    color='black', alpha=0.15, linewidth=0)
+    ax.plot(base_x, base_mean, color='black', linewidth=2.5,
+            label=f'Baseline (uncertainty-weighted, n={len(base_data["all_rewards"])})')
+
+    ax.fill_between(abl_x, abl_mean - abl_std, abl_mean + abl_std,
+                    color='steelblue', alpha=0.15, linewidth=0)
+    ax.plot(abl_x, abl_mean, color='steelblue', linewidth=2.5,
+            label=f'Ablation (uniform sampling, n={len(abl_data["all_rewards"])})')
+
+    ax.axhline(y=target_score, color='red', linestyle='--',
+               linewidth=1.5, label=f'Target ({target_score})')
+
+    ax.set_xlabel('Total Environmental Steps', fontsize=12, fontweight='bold')
+    ax.set_ylabel('Cumulative Reward', fontsize=12, fontweight='bold')
+    ax.set_title('Baseline vs Ablation — Mean ± Std', fontsize=13, fontweight='bold')
+    ax.legend()
+    ax.grid(True)
+
+    save_figure(fig, os.path.join(figures_dir, 'compare_baseline_vs_ablation.png'))
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description='DOB-MBRL plot results')
     parser.add_argument('--log-dir', type=str, default=None,
@@ -128,6 +186,10 @@ def parse_args():
                         help='멀티시드 결과 디렉토리 (results/)')
     parser.add_argument('--multi-seed', action='store_true',
                         help='멀티시드 결과 플롯')
+    parser.add_argument('--ablation', action='store_true',
+                        help='Ablation 결과 플롯 (DOB_MBRL_MultiSeed_Result_Ablation.pkl 사용)')
+    parser.add_argument('--compare', action='store_true',
+                        help='Baseline vs Ablation 비교 오버레이 figure 생성')
     parser.add_argument('--figures-dir', type=str, default=None,
                         help='figure 저장 디렉토리 (기본: 자동 설정)')
     return parser.parse_args()
@@ -136,10 +198,17 @@ def parse_args():
 def main():
     args = parse_args()
 
-    if args.multi_seed and args.results_dir:
-        results_path = os.path.join(args.results_dir, 'DOB_MBRL_MultiSeed_Result.pkl')
-        figures_dir  = args.figures_dir or os.path.join(
-            os.path.dirname(args.results_dir), 'figures')
+    if args.compare and args.results_dir:
+        base_dir    = os.path.dirname(args.results_dir)
+        figures_dir = args.figures_dir or os.path.join(base_dir, 'figures')
+        plot_compare(args.results_dir, figures_dir)
+    elif args.multi_seed and args.results_dir:
+        fname        = ('DOB_MBRL_MultiSeed_Result_Ablation.pkl' if args.ablation
+                        else 'DOB_MBRL_MultiSeed_Result.pkl')
+        results_path = os.path.join(args.results_dir, fname)
+        base_dir     = os.path.dirname(args.results_dir)
+        sub          = 'ablation' if args.ablation else 'baseline'
+        figures_dir  = args.figures_dir or os.path.join(base_dir, 'figures', sub)
         plot_multi_seed(results_path, figures_dir)
     elif args.log_dir:
         log_path    = os.path.join(args.log_dir, f'seed_{args.seed}_result.pkl')

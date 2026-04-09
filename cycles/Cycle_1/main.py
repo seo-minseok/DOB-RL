@@ -13,7 +13,7 @@ from dob_mbrl.training import train_DOB_core, DOBMBRLConfig
 
 def parse_args():
     parser = argparse.ArgumentParser(description='DOB-MBRL single-seed training')
-    parser.add_argument('--checkpoint-dir', type=str, default='./checkpoints',
+    parser.add_argument('--checkpoint-dir', type=str, default='./checkpoints/baseline',
                         help='체크포인트 저장 디렉토리')
     parser.add_argument('--seed', type=int, default=1,
                         help='랜덤 시드 (1-based)')

@@ -33,7 +33,7 @@ def _run_single(args):
 
 def parse_args():
     parser = argparse.ArgumentParser(description='DOB-MBRL multi-seed training')
-    parser.add_argument('--checkpoint-dir', type=str, default='./checkpoints',
+    parser.add_argument('--checkpoint-dir', type=str, default='./checkpoints/baseline',
                         help='체크포인트 저장 디렉토리')
     parser.add_argument('--num-seeds', type=int, default=16,
                         help='병렬 실행 시드 수')
@@ -47,7 +47,8 @@ def main():
     cfg  = DOBMBRLConfig()
 
     os.makedirs(args.checkpoint_dir, exist_ok=True)
-    results_dir = os.path.join(os.path.dirname(args.checkpoint_dir), 'results')
+    script_dir  = os.path.dirname(os.path.abspath(__file__))
+    results_dir = os.path.join(script_dir, 'results')
     os.makedirs(results_dir, exist_ok=True)
 
     num_runs     = args.num_seeds
