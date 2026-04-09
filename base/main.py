@@ -5,6 +5,7 @@ Usage:
   python main.py --checkpoint-dir ./checkpoints --seed 0 --resume
 """
 import argparse
+import csv
 import os
 import pickle
 
@@ -45,6 +46,14 @@ def main():
     with open(log_path, 'wb') as f:
         pickle.dump({'rewards': rewards, 'steps': steps}, f)
     print(f'[main] Saved log → {log_path}')
+
+    csv_path = os.path.join(log_dir, f'seed_{args.seed}_result.csv')
+    with open(csv_path, 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(['episode', 'total_steps', 'reward'])
+        for ep, (s, r) in enumerate(zip(steps, rewards), start=1):
+            writer.writerow([ep, s, r])
+    print(f'[main] Saved log → {csv_path}')
 
 
 if __name__ == '__main__':

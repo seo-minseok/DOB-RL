@@ -5,6 +5,7 @@ Usage:
   python run_multi_seed.py --checkpoint-dir ./checkpoints --num-seeds 16
 """
 import argparse
+import csv
 import multiprocessing
 import os
 import pickle
@@ -87,6 +88,16 @@ def main():
     with open(result_path, 'wb') as f:
         pickle.dump({'all_rewards': all_rewards, 'all_steps': all_steps}, f)
     print(f'Saved: {result_path}')
+
+    csv_fname = result_fname.replace('.pkl', '.csv')
+    csv_path  = os.path.join(results_dir, csv_fname)
+    with open(csv_path, 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(['seed', 'episode', 'total_steps', 'reward'])
+        for seed_idx, (rewards_s, steps_s) in enumerate(zip(all_rewards, all_steps), start=1):
+            for ep, (s, r) in enumerate(zip(steps_s, rewards_s), start=1):
+                writer.writerow([seed_idx, ep, s, r])
+    print(f'Saved: {csv_path}')
 
     # --- Interpolation onto common step axis ---
     max_total_step = max(max(steps) for steps in all_steps if steps)
