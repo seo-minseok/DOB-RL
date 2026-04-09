@@ -1,8 +1,10 @@
 # 학습 출력물 (git 추적 제외)
 **/checkpoints/
 **/logs/
-**/figures/
-**/results/
+**/results/*.pkl
+**/results/*.png
+**/results/*.pt
+
 
 # Python
 __pycache__/
