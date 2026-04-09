@@ -155,16 +155,16 @@ def plot_compare(results_dir: str, figures_dir: str, target_score: float = 480.0
     fig, ax = plt.subplots(1, 1, figsize=(10, 6), facecolor='white')
 
     ax.fill_between(base_x, base_mean - base_std, base_mean + base_std,
-                    color='black', alpha=0.15, linewidth=0)
-    ax.plot(base_x, base_mean, color='black', linewidth=2.5,
+                    color='steelblue', alpha=0.15, linewidth=0)
+    ax.plot(base_x, base_mean, color='steelblue', linewidth=2.5,
             label=f'Baseline (uncertainty-weighted, n={len(base_data["all_rewards"])})')
 
     ax.fill_between(abl_x, abl_mean - abl_std, abl_mean + abl_std,
-                    color='steelblue', alpha=0.15, linewidth=0)
-    ax.plot(abl_x, abl_mean, color='steelblue', linewidth=2.5,
+                    color='red', alpha=0.15, linewidth=0)
+    ax.plot(abl_x, abl_mean, color='red', linewidth=2.5,
             label=f'Ablation (uniform sampling, n={len(abl_data["all_rewards"])})')
 
-    ax.axhline(y=target_score, color='red', linestyle='--',
+    ax.axhline(y=target_score, color='black', linestyle='--',
                linewidth=1.5, label=f'Target ({target_score})')
 
     ax.set_xlabel('Total Environmental Steps', fontsize=12, fontweight='bold')
