@@ -33,7 +33,7 @@ def main():
 
     print(f'[main] seed={args.seed}  checkpoint_dir={args.checkpoint_dir}  resume={args.resume}')
 
-    rewards, steps = train_DOB_core(
+    rewards, steps, metrics = train_DOB_core(
         run_idx        = args.seed,
         num_episodes   = cfg.num_episodes,
         result_queue   = None,
@@ -44,15 +44,19 @@ def main():
 
     log_path = os.path.join(log_dir, f'seed_{args.seed}_result.pkl')
     with open(log_path, 'wb') as f:
-        pickle.dump({'rewards': rewards, 'steps': steps}, f)
+        pickle.dump({'rewards': rewards, 'steps': steps, 'metrics': metrics}, f)
     print(f'[main] Saved log → {log_path}')
 
+    metric_keys = [
+        'nominal_error_avg', 'residual_error_avg', 'dhat_norm_avg', 'uncertainty_avg',
+        'res_net_loss', 'rbf_loss', 'td_loss_avg', 'episode_length', 'epsilon',
+    ]
     csv_path = os.path.join(log_dir, f'seed_{args.seed}_result.csv')
     with open(csv_path, 'w', newline='') as f:
         writer = csv.writer(f)
-        writer.writerow(['episode', 'total_steps', 'reward'])
-        for ep, (s, r) in enumerate(zip(steps, rewards), start=1):
-            writer.writerow([ep, s, r])
+        writer.writerow(['episode', 'total_steps', 'reward'] + metric_keys)
+        for ep, (s, r, m) in enumerate(zip(steps, rewards, metrics), start=1):
+            writer.writerow([ep, s, r] + [m[k] for k in metric_keys])
     print(f'[main] Saved log → {csv_path}')
 
 

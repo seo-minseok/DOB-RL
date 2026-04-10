@@ -16,7 +16,7 @@ from ..models import QNetwork, ResidualDxNet, NormalizedRBFModel
 from ..utils.buffer import ReplayBufferDOB
 from ..dynamics import (
     default_cartpole_params, step_nominal_cartpole,
-    ACT_ELEMENTS, FPINV,
+    ACT_ELEMENTS, FPINV, F_MAT,
 )
 from ..envs.cartpole_utils import (
     make_cartpole_env, reset_env, step_env, reward_is_done_function,
@@ -86,6 +86,7 @@ def train_DOB_core(run_idx: int,
 
     episode_cumulative_reward_vector = []
     episode_step_vector              = []
+    episode_metrics_list             = []
     total_step_ct                    = 0
     model_trained_at_least_once      = False
     best_avg_score                   = -float('inf')
@@ -111,15 +112,19 @@ def train_DOB_core(run_idx: int,
     # --- Main Training Loop ---
     for episode_ct in range(start_episode, num_episodes + 1):
 
+        # Per-episode metric collectors
+        ep_res_net_loss = float('nan')
+        ep_rbf_loss     = float('nan')
+
         # [Phase 1] Model Training & Rollout
         if real_buffer.length > cfg.mini_batch_size and total_step_ct > cfg.warm_start_samples:
             if cfg.real_ratio < 1.0:
-                train_residual_dx_model_dob(
+                ep_res_net_loss = train_residual_dx_model_dob(
                     res_net, res_net_opt, real_buffer,
                     cfg.mini_batch_size, cfg.num_epochs,
                     use_uncertainty_sampling=cfg.use_uncertainty_sampling,
                 )
-                train_uncertainty_rbf(
+                ep_rbf_loss = train_uncertainty_rbf(
                     uncert_model, rbf_opt, real_buffer, res_net,
                     cfg.mini_batch_size, 5
                 )
@@ -134,6 +139,11 @@ def train_DOB_core(run_idx: int,
         obs_t          = torch.tensor(obs).unsqueeze(0)
         episode_reward = 0.0
         dhat           = np.zeros(2, dtype=np.float32)   # 에피소드마다 리셋
+        ep_nominal_errors  = []
+        ep_residual_errors = []
+        ep_dhat_norms      = []
+        ep_uncertainty_mags = []
+        ep_td_losses       = []
 
         # [Phase 3] Environment Interaction
         for step_ct in range(1, cfg.max_steps_per_ep + 1):
@@ -180,6 +190,11 @@ def train_DOB_core(run_idx: int,
 
             uncertainty = FPINV @ e - dx_res
 
+            ep_nominal_errors.append(np.linalg.norm(e))
+            ep_residual_errors.append(np.linalg.norm(e - F_MAT @ dx_res))
+            ep_dhat_norms.append(np.linalg.norm(dhat))
+            ep_uncertainty_mags.append(np.linalg.norm(uncertainty))
+
             reward_arr, _ = reward_is_done_function(next_obs.reshape(1, -1))
             reward = float(reward_arr[0])
 
@@ -225,6 +240,7 @@ def train_DOB_core(run_idx: int,
                     act_mask = (act_elements_t.unsqueeze(0) == act_bt).float()
                     q_pred   = (q_network(obs_bt) * act_mask).sum(dim=1)
                     loss     = nn.functional.mse_loss(q_pred, target_q)
+                    ep_td_losses.append(loss.item())
 
                     critic_opt.zero_grad()
                     loss.backward()
@@ -238,6 +254,19 @@ def train_DOB_core(run_idx: int,
             if is_done:
                 break
 
+        ep_metrics = {
+            'nominal_error_avg':  float(np.mean(ep_nominal_errors))  if ep_nominal_errors  else float('nan'),
+            'residual_error_avg': float(np.mean(ep_residual_errors)) if ep_residual_errors else float('nan'),
+            'dhat_norm_avg':      float(np.mean(ep_dhat_norms))      if ep_dhat_norms      else float('nan'),
+            'uncertainty_avg':    float(np.mean(ep_uncertainty_mags))if ep_uncertainty_mags else float('nan'),
+            'res_net_loss':       ep_res_net_loss,
+            'rbf_loss':           ep_rbf_loss,
+            'td_loss_avg':        float(np.mean(ep_td_losses)) if ep_td_losses else float('nan'),
+            'episode_length':     step_ct,
+            'epsilon':            float(epsilon),
+        }
+        episode_metrics_list.append(ep_metrics)
+
         episode_cumulative_reward_vector.append(episode_reward)
         episode_step_vector.append(total_step_ct)
 
@@ -247,6 +276,7 @@ def train_DOB_core(run_idx: int,
                 'ep_idx' : episode_ct,
                 'reward' : episode_reward,
                 'step'   : total_step_ct,
+                **ep_metrics,
             })
 
         if len(episode_cumulative_reward_vector) >= 10:
@@ -266,4 +296,4 @@ def train_DOB_core(run_idx: int,
                       f'at ep {episode_ct} / step {total_step_ct}')
 
     env.close()
-    return episode_cumulative_reward_vector, episode_step_vector
+    return episode_cumulative_reward_vector, episode_step_vector, episode_metrics_list

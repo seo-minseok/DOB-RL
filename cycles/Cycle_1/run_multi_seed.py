@@ -22,14 +22,14 @@ def _run_single(args):
           f'(uncertainty_sampling={use_uncertainty_sampling})...')
     cfg = DOBMBRLConfig()
     cfg.use_uncertainty_sampling = use_uncertainty_sampling
-    rewards, steps = train_DOB_core(
+    rewards, steps, metrics = train_DOB_core(
         run_idx        = run_idx,
         num_episodes   = num_episodes,
         checkpoint_dir = checkpoint_dir,
         cfg            = cfg,
     )
     print(f'[Run {run_idx:02d}] Done.')
-    return rewards, steps
+    return rewards, steps, metrics
 
 
 def parse_args():
@@ -76,8 +76,9 @@ def main():
         print(f'Parallel unavailable ({exc}). Falling back to sequential.')
         results = [_run_single(a) for a in args_list]
 
-    all_rewards = [r[0] for r in results]
-    all_steps   = [r[1] for r in results]
+    all_rewards  = [r[0] for r in results]
+    all_steps    = [r[1] for r in results]
+    all_metrics  = [r[2] for r in results]
 
     total_time = time.time() - start_time
     print(f'\n=== All training complete ({total_time / 60:.1f} min) ===')
@@ -86,17 +87,23 @@ def main():
                     else 'DOB_MBRL_MultiSeed_Result.pkl')
     result_path = os.path.join(results_dir, result_fname)
     with open(result_path, 'wb') as f:
-        pickle.dump({'all_rewards': all_rewards, 'all_steps': all_steps}, f)
+        pickle.dump({'all_rewards': all_rewards, 'all_steps': all_steps,
+                     'all_metrics': all_metrics}, f)
     print(f'Saved: {result_path}')
 
+    metric_keys = [
+        'nominal_error_avg', 'residual_error_avg', 'dhat_norm_avg', 'uncertainty_avg',
+        'res_net_loss', 'rbf_loss', 'td_loss_avg', 'episode_length', 'epsilon',
+    ]
     csv_fname = result_fname.replace('.pkl', '.csv')
     csv_path  = os.path.join(results_dir, csv_fname)
     with open(csv_path, 'w', newline='') as f:
         writer = csv.writer(f)
-        writer.writerow(['seed', 'episode', 'total_steps', 'reward'])
-        for seed_idx, (rewards_s, steps_s) in enumerate(zip(all_rewards, all_steps), start=1):
-            for ep, (s, r) in enumerate(zip(steps_s, rewards_s), start=1):
-                writer.writerow([seed_idx, ep, s, r])
+        writer.writerow(['seed', 'episode', 'total_steps', 'reward'] + metric_keys)
+        for seed_idx, (rewards_s, steps_s, metrics_s) in enumerate(
+                zip(all_rewards, all_steps, all_metrics), start=1):
+            for ep, (s, r, m) in enumerate(zip(steps_s, rewards_s, metrics_s), start=1):
+                writer.writerow([seed_idx, ep, s, r] + [m[k] for k in metric_keys])
     print(f'Saved: {csv_path}')
 
     # --- Interpolation onto common step axis ---
