@@ -188,6 +188,53 @@ def plot_compare_reward(baseline_csv: str, ablation_csv: str, figures_dir: str):
     save_figure(fig, os.path.join(figures_dir, 'compare_baseline_vs_ablation_reward.png'))
 
 
+def plot_compare_all(baseline_csv: str, ablation_csv: str, figures_dir: str):
+    """모든 metric에 대해 Baseline(파랑) vs Ablation(빨강) 비교 figure를 생성."""
+    b_data = load_csv(baseline_csv)
+    a_data = load_csv(ablation_csv)
+    os.makedirs(figures_dir, exist_ok=True)
+
+    for col, meta in METRIC_META.items():
+        b_ep, b_mean, b_std = compute_mean_std(b_data, col)
+        a_ep, a_mean, a_std = compute_mean_std(a_data, col)
+
+        b_valid = ~np.isnan(b_mean)
+        a_valid = ~np.isnan(a_mean)
+
+        if not b_valid.any() and not a_valid.any():
+            print(f'Skip {col}: all NaN in both')
+            continue
+
+        fig, ax = plt.subplots(1, 1, figsize=(10, 5), facecolor='white')
+
+        if b_valid.any():
+            ax.fill_between(b_ep[b_valid], (b_mean - b_std)[b_valid], (b_mean + b_std)[b_valid],
+                            color='steelblue', alpha=0.2, linewidth=0)
+            ax.plot(b_ep[b_valid], b_mean[b_valid],
+                    color='steelblue', linewidth=2.0, label=f'Baseline (n={len(b_data)})')
+
+        if a_valid.any():
+            ax.fill_between(a_ep[a_valid], (a_mean - a_std)[a_valid], (a_mean + a_std)[a_valid],
+                            color='crimson', alpha=0.2, linewidth=0)
+            ax.plot(a_ep[a_valid], a_mean[a_valid],
+                    color='crimson', linewidth=2.0, label=f'Ablation (n={len(a_data)})')
+
+        if 'hline' in meta:
+            ax.axhline(y=meta['hline'], color='gray', linestyle='--',
+                       linewidth=1.5, label=str(meta['hline']))
+
+        ax.set_xlabel('Episode', fontsize=12, fontweight='bold')
+        ax.set_ylabel(meta['label'], fontsize=12, fontweight='bold')
+        ax.set_title(f'{meta["title"]} — Baseline vs Ablation', fontsize=13, fontweight='bold')
+        ax.legend()
+        ax.grid(True)
+
+        fname = meta['fname']
+        save_figure(fig, os.path.join(figures_dir, fname))
+
+    print(f'All comparison figures saved to {figures_dir}')
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--csv', type=str, default=None,
@@ -195,11 +242,13 @@ def main():
     parser.add_argument('--figures-dir', type=str, default=None,
                         help='figure 저장 디렉토리')
     parser.add_argument('--compare', action='store_true',
-                        help='Baseline vs Ablation 비교 오버레이 figure 생성')
+                        help='Baseline vs Ablation reward 비교 figure 생성')
+    parser.add_argument('--compare-all', action='store_true',
+                        help='모든 metric에 대해 Baseline vs Ablation 비교 figure 생성')
     parser.add_argument('--baseline-csv', type=str, default=None,
-                        help='--compare 시 baseline CSV 경로')
+                        help='--compare / --compare-all 시 baseline CSV 경로')
     parser.add_argument('--ablation-csv', type=str, default=None,
-                        help='--compare 시 ablation CSV 경로')
+                        help='--compare / --compare-all 시 ablation CSV 경로')
     args = parser.parse_args()
 
     if args.compare:
@@ -208,6 +257,14 @@ def main():
         figures_dir = args.figures_dir or os.path.join(
             os.path.dirname(os.path.dirname(args.baseline_csv)), 'figures')
         plot_compare_reward(args.baseline_csv, args.ablation_csv, figures_dir)
+        return
+
+    if args.compare_all:
+        if not args.baseline_csv or not args.ablation_csv:
+            parser.error('--compare-all requires --baseline-csv and --ablation-csv')
+        figures_dir = args.figures_dir or os.path.join(
+            os.path.dirname(os.path.dirname(args.baseline_csv)), 'figures', 'compare')
+        plot_compare_all(args.baseline_csv, args.ablation_csv, figures_dir)
         return
 
     if not args.csv:
