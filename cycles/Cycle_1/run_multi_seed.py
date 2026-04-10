@@ -106,31 +106,6 @@ def main():
                 writer.writerow([seed_idx, ep, s, r] + [m[k] for k in metric_keys])
     print(f'Saved: {csv_path}')
 
-    # --- Interpolation onto common step axis ---
-    max_total_step = max(max(steps) for steps in all_steps if steps)
-    common_steps   = np.linspace(0, max_total_step, 1000)
-    interp_rewards = np.full((num_runs, 1000), np.nan, dtype=np.float64)
-
-    for i in range(num_runs):
-        x_run = np.array([0] + list(all_steps[i]),   dtype=np.float64)
-        y_run = np.array([0] + list(all_rewards[i]), dtype=np.float64)
-
-        _, unique_idx = np.unique(x_run, return_index=True)
-        x_run = x_run[unique_idx]
-        y_run = y_run[unique_idx]
-
-        if len(x_run) < 2:
-            continue
-
-        vals = np.interp(common_steps, x_run, y_run, left=np.nan, right=np.nan)
-        last_step = x_run[-1]
-        last_val  = y_run[-1]
-        vals[common_steps > last_step] = last_val
-        interp_rewards[i, :] = vals
-
-    mean_curve = np.nanmean(interp_rewards, axis=0)
-    std_curve  = np.nanstd( interp_rewards, axis=0)
-
     # 요약 출력
     print(f'Final mean reward (last 10 ep avg across seeds): '
           f'{np.nanmean([np.mean(r[-10:]) for r in all_rewards if r]):.1f}')
