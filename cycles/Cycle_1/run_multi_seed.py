@@ -94,6 +94,7 @@ def main():
     metric_keys = [
         'nominal_error_avg', 'residual_error_avg', 'dhat_norm_avg', 'uncertainty_avg',
         'res_net_loss', 'rbf_loss', 'td_loss_avg', 'episode_length', 'epsilon',
+        'buffer_uncert_avg', 'sampled_uncert_avg',
     ]
     csv_fname = result_fname.replace('.pkl', '.csv')
     csv_path  = os.path.join(results_dir, csv_fname)

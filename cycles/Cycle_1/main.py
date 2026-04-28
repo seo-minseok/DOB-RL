@@ -50,6 +50,7 @@ def main():
     metric_keys = [
         'nominal_error_avg', 'residual_error_avg', 'dhat_norm_avg', 'uncertainty_avg',
         'res_net_loss', 'rbf_loss', 'td_loss_avg', 'episode_length', 'epsilon',
+        'buffer_uncert_avg', 'sampled_uncert_avg',
     ]
     csv_path = os.path.join(log_dir, f'seed_{args.seed}_result.csv')
     with open(csv_path, 'w', newline='') as f:

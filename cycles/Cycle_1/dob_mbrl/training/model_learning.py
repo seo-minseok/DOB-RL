@@ -13,26 +13,32 @@ from ..dynamics.constants import FPINV
 def train_residual_dx_model_dob(res_net, optimizer,
                                  real_buffer, mini_batch_size: int,
                                  num_epochs: int,
-                                 use_uncertainty_sampling: bool = True) -> float:
+                                 use_uncertainty_sampling: bool = True):
     """
     MATLAB: trainResidualDxModelDOB
     use_uncertainty_sampling=True : uncertainty-weighted sampling (baseline)
     use_uncertainty_sampling=False: uniform random sampling (ablation)
     Target: buffer의 dhat (DOB disturbance estimate).
+
+    Returns: (loss_avg, sampled_uncert_avg)
+      sampled_uncert_avg: 실제 샘플링된 데이터의 uncertainty magnitude 평균
     """
     res_net.train()
     valid_len = real_buffer.length
 
+    uncert_mag = np.linalg.norm(real_buffer.uncertainty[:valid_len], axis=1)  # (N,)
+
     if use_uncertainty_sampling:
         # MATLAB: uncertMag = sqrt(sum(uncertainty.^2,1))
-        uncert_mag = np.linalg.norm(real_buffer.uncertainty[:valid_len], axis=1)  # (N,)
-        weights    = uncert_mag + 1e-3
-        probs      = weights / weights.sum()
+        weights = uncert_mag + 1e-3
+        probs   = weights / weights.sum()
     else:
         probs = None  # uniform
 
-    loss_sum = 0.0
-    loss_ct  = 0
+    loss_sum         = 0.0
+    loss_ct          = 0
+    sampled_uncert_sum = 0.0
+    sampled_uncert_ct  = 0
 
     for _ in range(num_epochs):
         num_iterations = valid_len // mini_batch_size
@@ -54,10 +60,14 @@ def train_residual_dx_model_dob(res_net, optimizer,
             loss.backward()
             optimizer.step()
 
-            loss_sum += loss.item()
-            loss_ct  += 1
+            loss_sum           += loss.item()
+            loss_ct            += 1
+            sampled_uncert_sum += float(uncert_mag[idx].mean())
+            sampled_uncert_ct  += 1
 
-    return loss_sum / max(1, loss_ct)
+    loss_avg         = loss_sum / max(1, loss_ct)
+    sampled_uncert_avg = sampled_uncert_sum / max(1, sampled_uncert_ct)
+    return loss_avg, sampled_uncert_avg
 
 
 def train_uncertainty_rbf(uncert_model, optimizer, real_buffer,

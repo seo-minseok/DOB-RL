@@ -102,6 +102,11 @@ METRIC_META = {
         'title': 'TD Loss — Mean ± Std (avg per episode)',
         'fname': 'td_loss_avg.png',
     },
+    'td_loss': {
+        'label': 'TD MSE Loss',
+        'title': 'TD Loss — Mean ± Std (avg per episode)',
+        'fname': 'td_loss_avg.png',
+    },
     'episode_length': {
         'label': 'Steps',
         'title': 'Episode Length — Mean ± Std',

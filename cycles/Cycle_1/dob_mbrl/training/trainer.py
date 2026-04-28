@@ -113,13 +113,19 @@ def train_DOB_core(run_idx: int,
     for episode_ct in range(start_episode, num_episodes + 1):
 
         # Per-episode metric collectors
-        ep_res_net_loss = float('nan')
-        ep_rbf_loss     = float('nan')
+        ep_res_net_loss      = float('nan')
+        ep_rbf_loss          = float('nan')
+        ep_buffer_uncert_avg = float('nan')
+        ep_sampled_uncert_avg = float('nan')
 
         # [Phase 1] Model Training & Rollout
         if real_buffer.length > cfg.mini_batch_size and total_step_ct > cfg.warm_start_samples:
             if cfg.real_ratio < 1.0:
-                ep_res_net_loss = train_residual_dx_model_dob(
+                valid_len = real_buffer.length
+                ep_buffer_uncert_avg = float(
+                    np.linalg.norm(real_buffer.uncertainty[:valid_len], axis=1).mean()
+                )
+                ep_res_net_loss, ep_sampled_uncert_avg = train_residual_dx_model_dob(
                     res_net, res_net_opt, real_buffer,
                     cfg.mini_batch_size, cfg.num_epochs,
                     use_uncertainty_sampling=cfg.use_uncertainty_sampling,
@@ -255,15 +261,17 @@ def train_DOB_core(run_idx: int,
                 break
 
         ep_metrics = {
-            'nominal_error_avg':  float(np.mean(ep_nominal_errors))  if ep_nominal_errors  else float('nan'),
-            'residual_error_avg': float(np.mean(ep_residual_errors)) if ep_residual_errors else float('nan'),
-            'dhat_norm_avg':      float(np.mean(ep_dhat_norms))      if ep_dhat_norms      else float('nan'),
-            'uncertainty_avg':    float(np.mean(ep_uncertainty_mags))if ep_uncertainty_mags else float('nan'),
-            'res_net_loss':       ep_res_net_loss,
-            'rbf_loss':           ep_rbf_loss,
-            'td_loss_avg':        float(np.mean(ep_td_losses)) if ep_td_losses else float('nan'),
-            'episode_length':     step_ct,
-            'epsilon':            float(epsilon),
+            'nominal_error_avg':   float(np.mean(ep_nominal_errors))   if ep_nominal_errors   else float('nan'),
+            'residual_error_avg':  float(np.mean(ep_residual_errors))  if ep_residual_errors  else float('nan'),
+            'dhat_norm_avg':       float(np.mean(ep_dhat_norms))       if ep_dhat_norms       else float('nan'),
+            'uncertainty_avg':     float(np.mean(ep_uncertainty_mags)) if ep_uncertainty_mags else float('nan'),
+            'res_net_loss':        ep_res_net_loss,
+            'rbf_loss':            ep_rbf_loss,
+            'td_loss_avg':         float(np.mean(ep_td_losses)) if ep_td_losses else float('nan'),
+            'episode_length':      step_ct,
+            'epsilon':             float(epsilon),
+            'buffer_uncert_avg':   ep_buffer_uncert_avg,
+            'sampled_uncert_avg':  ep_sampled_uncert_avg,
         }
         episode_metrics_list.append(ep_metrics)
 
