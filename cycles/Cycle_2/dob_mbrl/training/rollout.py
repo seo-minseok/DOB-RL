@@ -27,9 +27,11 @@ def generate_samples_dob(real_buffer, model_buffer,
     B                = options['mini_batch_size']
     noise_std        = max(rollout_noise, options['epsilon_min_model'])
 
+    uncert_mag_all = []
+
     for _ in range(num_iter):
         if real_buffer.length < B:
-            return model_buffer
+            break
 
         idx         = np.random.randint(0, real_buffer.length, size=B)
         current_obs = torch.tensor(real_buffer.obs[idx])   # (B, 24)
@@ -56,6 +58,7 @@ def generate_samples_dob(real_buffer, model_buffer,
             with torch.no_grad():
                 pred_uncert  = uncert_model(inp_rbf).cpu().numpy()  # (n_alive, 7)
             uncert_mag_arr   = np.linalg.norm(pred_uncert, axis=1)  # (n_alive,)
+            uncert_mag_all.append(uncert_mag_arr)
             is_reliable      = uncert_mag_arr < uncert_threshold
 
             if h == 0:
@@ -83,7 +86,8 @@ def generate_samples_dob(real_buffer, model_buffer,
                 to_update = reliable_idx[not_done]
                 current_obs[to_update] = torch.tensor(rel_next[not_done])
 
-    return model_buffer
+    rollout_uncert_avg = float(np.concatenate(uncert_mag_all).mean()) if uncert_mag_all else float('nan')
+    return model_buffer, rollout_uncert_avg
 
 
 def sample_mixed_minibatch(model_trained: bool, real_ratio: float,

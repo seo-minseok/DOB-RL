@@ -131,10 +131,11 @@ def train_DOB_core(run_idx: int,
     # --- Main Training Loop ---
     for episode_ct in range(start_episode, num_episodes + 1):
 
-        ep_res_net_loss       = float('nan')
-        ep_rbf_loss           = float('nan')
-        ep_buffer_uncert_avg  = float('nan')
-        ep_sampled_uncert_avg = float('nan')
+        ep_res_net_loss        = float('nan')
+        ep_rbf_loss            = float('nan')
+        ep_buffer_uncert_avg   = float('nan')
+        ep_sampled_uncert_avg  = float('nan')
+        ep_rollout_uncert_avg  = float('nan')
 
         # [Phase 1] Model Training & Rollout
         if real_buffer.length > cfg.mini_batch_size and total_step_ct > cfg.warm_start_samples:
@@ -152,7 +153,7 @@ def train_DOB_core(run_idx: int,
                     cfg.mini_batch_size, 5
                 )
                 model_trained_at_least_once = True
-                model_buffer = generate_samples_dob(
+                model_buffer, ep_rollout_uncert_avg = generate_samples_dob(
                     real_buffer, model_buffer, res_net, uncert_model,
                     actor, cfg.epsilon_min_model, sample_gen_options,
                     p_nom, use_nominal
@@ -309,8 +310,9 @@ def train_DOB_core(run_idx: int,
             'td_loss_avg':         float(np.mean(ep_td_losses)) if ep_td_losses else float('nan'),
             'episode_length':      step_ct,
             'expl_noise':          cfg.expl_noise,
-            'buffer_uncert_avg':   ep_buffer_uncert_avg,
-            'sampled_uncert_avg':  ep_sampled_uncert_avg,
+            'buffer_uncert_avg':    ep_buffer_uncert_avg,
+            'sampled_uncert_avg':   ep_sampled_uncert_avg,
+            'rollout_uncert_avg':   ep_rollout_uncert_avg,
         }
 
         episode_cumulative_reward_vector.append(episode_reward)
@@ -328,7 +330,8 @@ def train_DOB_core(run_idx: int,
                         'seed', 'episode', 'total_steps', 'reward',
                         'nominal_error_avg', 'residual_error_avg', 'dhat_norm_avg',
                         'uncertainty_avg', 'res_net_loss', 'rbf_loss', 'td_loss_avg',
-                        'episode_length', 'expl_noise', 'buffer_uncert_avg', 'sampled_uncert_avg',
+                        'episode_length', 'expl_noise', 'buffer_uncert_avg',
+                        'sampled_uncert_avg', 'rollout_uncert_avg',
                     ])
                 writer.writerow([
                     run_idx, episode_ct, total_step_ct, episode_reward,
@@ -337,7 +340,7 @@ def train_DOB_core(run_idx: int,
                     ep_metrics['res_net_loss'], ep_metrics['rbf_loss'],
                     ep_metrics['td_loss_avg'], ep_metrics['episode_length'],
                     ep_metrics['expl_noise'], ep_metrics['buffer_uncert_avg'],
-                    ep_metrics['sampled_uncert_avg'],
+                    ep_metrics['sampled_uncert_avg'], ep_metrics['rollout_uncert_avg'],
                 ])
 
         if result_queue is not None:
