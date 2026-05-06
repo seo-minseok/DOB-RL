@@ -99,6 +99,127 @@ def plot_multiseed_csv(csv_path: str, figures_dir: str):
         save_figure(fig, os.path.join(figures_dir, fname))
 
 
+METRIC_META = {
+    'reward':             ('Cumulative Reward',     'Episode Reward',            None),
+    'episode_length':     ('Steps',                 'Episode Length',            None),
+    'nominal_error_avg':  ('Error',                 'Nominal Error (avg)',       None),
+    'residual_error_avg': ('Error',                 'Residual Error (avg)',      None),
+    'dhat_norm_avg':      ('||d_hat||',             'DOB Estimate Norm (avg)',   None),
+    'uncertainty_avg':    ('Uncertainty',           'Uncertainty (avg)',         None),
+    'res_net_loss':       ('Loss',                  'ResNet Loss',               None),
+    'rbf_loss':           ('Loss',                  'RBF Loss',                  None),
+    'td_loss_avg':        ('TD Loss',               'TD Loss (avg)',             None),
+    'buffer_uncert_avg':  ('Uncertainty',           'Buffer Uncertainty (avg)',  None),
+    'sampled_uncert_avg': ('Uncertainty',           'Sampled Uncertainty (avg)', None),
+}
+
+
+def plot_ratio_dir(ratio_dir: str, figures_dir: str):
+    """real_ratio=X 디렉토리 내 seed_N_progress.csv 파일들을 읽어 metric별 figure 생성."""
+    import glob
+    csv_paths = sorted(glob.glob(os.path.join(ratio_dir, 'seed_*_progress.csv')))
+    if not csv_paths:
+        print(f'No progress CSVs found in {ratio_dir}')
+        return
+
+    os.makedirs(figures_dir, exist_ok=True)
+
+    # {seed: {col: list}} 로드
+    all_data = {}
+    for p in csv_paths:
+        seed_data = defaultdict(list)
+        with open(p, newline='') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                for k, v in row.items():
+                    if k == 'seed':
+                        continue
+                    try:
+                        seed_data[k].append(float(v) if v not in ('nan', '', 'None') else float('nan'))
+                    except ValueError:
+                        seed_data[k].append(float('nan'))
+        seed_id = int(os.path.basename(p).split('_')[1])
+        all_data[seed_id] = seed_data
+
+    seeds = sorted(all_data.keys())
+    num_seeds = len(seeds)
+    print(f'Loaded {num_seeds} seed(s) from {ratio_dir}')
+
+    ratio_label = os.path.basename(ratio_dir.rstrip('/\\'))
+
+    for col, (ylabel, title, _) in METRIC_META.items():
+        # 유효한 시드 데이터 수집
+        arrays = []
+        for s in seeds:
+            vals = np.array(all_data[s].get(col, []))
+            arrays.append(vals)
+        if not arrays:
+            continue
+        max_ep = max(len(a) for a in arrays)
+        if max_ep == 0:
+            continue
+
+        matrix = np.full((num_seeds, max_ep), np.nan)
+        for i, a in enumerate(arrays):
+            matrix[i, :len(a)] = a
+
+        mean = np.nanmean(matrix, axis=0)
+        std  = np.nanstd(matrix, axis=0)
+        eps  = np.arange(1, max_ep + 1)
+
+        valid = ~np.isnan(mean)
+        if not valid.any():
+            print(f'Skip {col}: all NaN')
+            continue
+
+        ep_v, mean_v, std_v = eps[valid], mean[valid], std[valid]
+
+        fig, ax = plt.subplots(1, 1, figsize=(10, 5), facecolor='white')
+        if num_seeds > 1:
+            ax.fill_between(ep_v, mean_v - std_v, mean_v + std_v,
+                            color='steelblue', alpha=0.2, linewidth=0, label='±1 Std')
+        ax.plot(ep_v, mean_v, color='steelblue', linewidth=1.5,
+                label='Mean' if num_seeds > 1 else f'Seed {seeds[0]}')
+        if col == 'reward':
+            ax.axhline(y=500, color='red', linestyle='--', linewidth=1.5, label='Target (500)')
+        elif col == 'episode_length':
+            ax.axhline(y=500, color='red', linestyle='--', linewidth=1.5, label='500')
+        ax.set_xlabel('Episode', fontsize=12, fontweight='bold')
+        ax.set_ylabel(ylabel, fontsize=12, fontweight='bold')
+        ax.set_title(f'{title} [{ratio_label}] ({num_seeds} seed{"s" if num_seeds > 1 else ""})',
+                     fontsize=13, fontweight='bold')
+        ax.legend()
+        ax.grid(True)
+        save_figure(fig, os.path.join(figures_dir, f'{col}.png'))
+
+    # reward_multiseed: reward mean±std 별도 저장
+    if 'reward' in METRIC_META:
+        arrays = [np.array(all_data[s].get('reward', [])) for s in seeds]
+        max_ep = max(len(a) for a in arrays)
+        if max_ep > 0:
+            matrix = np.full((num_seeds, max_ep), np.nan)
+            for i, a in enumerate(arrays):
+                matrix[i, :len(a)] = a
+            mean = np.nanmean(matrix, axis=0)
+            std  = np.nanstd(matrix, axis=0)
+            eps  = np.arange(1, max_ep + 1)
+            valid = ~np.isnan(mean)
+            ep_v, mean_v, std_v = eps[valid], mean[valid], std[valid]
+
+            fig, ax = plt.subplots(1, 1, figsize=(10, 5), facecolor='white')
+            ax.fill_between(ep_v, mean_v - std_v, mean_v + std_v,
+                            color='steelblue', alpha=0.2, linewidth=0, label='±1 Std')
+            ax.plot(ep_v, mean_v, color='steelblue', linewidth=2.0, label='Mean')
+            ax.axhline(y=500, color='red', linestyle='--', linewidth=1.5, label='Target (500)')
+            ax.set_xlabel('Episode', fontsize=12, fontweight='bold')
+            ax.set_ylabel('Cumulative Reward', fontsize=12, fontweight='bold')
+            ax.set_title(f'Episode Reward — Mean ± Std [{ratio_label}] ({num_seeds} seed{"s" if num_seeds > 1 else ""})',
+                         fontsize=13, fontweight='bold')
+            ax.legend()
+            ax.grid(True)
+            save_figure(fig, os.path.join(figures_dir, 'reward_multiseed.png'))
+
+
 def plot_single_seed(log_path: str, figures_dir: str):
     with open(log_path, 'rb') as f:
         data = pickle.load(f)
@@ -143,6 +264,8 @@ def main():
     parser = argparse.ArgumentParser(description='DOB-MBRL plot results')
     parser.add_argument('--csv', type=str, default=None,
                         help='멀티시드 결과 CSV 경로')
+    parser.add_argument('--ratio-dir', type=str, default=None,
+                        help='real_ratio=X 결과 디렉토리 (seed_N_progress.csv 포함)')
     parser.add_argument('--log-dir', type=str, default=None,
                         help='단일 시드 로그 디렉토리 (logs/)')
     parser.add_argument('--seed', type=int, default=1,
@@ -151,7 +274,12 @@ def main():
                         help='figure 저장 디렉토리')
     args = parser.parse_args()
 
-    if args.csv:
+    if args.ratio_dir:
+        ratio_name = os.path.basename(args.ratio_dir.rstrip('/\\'))
+        figures_dir = args.figures_dir or os.path.join(
+            os.path.dirname(os.path.dirname(args.ratio_dir)), 'figures', ratio_name)
+        plot_ratio_dir(args.ratio_dir, figures_dir)
+    elif args.csv:
         figures_dir = args.figures_dir or os.path.join(
             os.path.dirname(os.path.dirname(args.csv)), 'figures', 'baseline')
         plot_multiseed_csv(args.csv, figures_dir)

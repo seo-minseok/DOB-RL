@@ -16,7 +16,7 @@ from dob_mbrl.training import train_DOB_core, DOBMBRLConfig
 
 
 def _run_single(args):
-    run_idx, num_episodes, checkpoint_dir = args
+    run_idx, num_episodes, checkpoint_dir, results_dir = args
     print(f'[Run {run_idx:02d}] DOB-MBRL training started...')
     cfg = DOBMBRLConfig()
     rewards, steps = train_DOB_core(
@@ -24,6 +24,7 @@ def _run_single(args):
         num_episodes   = num_episodes,
         checkpoint_dir = checkpoint_dir,
         cfg            = cfg,
+        results_dir    = results_dir,
     )
     print(f'[Run {run_idx:02d}] Done.')
     return rewards, steps
@@ -56,7 +57,7 @@ def main():
     start_time = time.time()
 
     num_workers = min(num_runs, multiprocessing.cpu_count())
-    args_list   = [(i + 1, max_episodes, args.checkpoint_dir) for i in range(num_runs)]
+    args_list   = [(i + 1, max_episodes, args.checkpoint_dir, results_dir) for i in range(num_runs)]
 
     try:
         with multiprocessing.Pool(processes=num_workers) as pool:

@@ -12,10 +12,12 @@ from ..dynamics.constants import FPINV
 
 def train_residual_dx_model_dob(res_net, optimizer,
                                  real_buffer, mini_batch_size: int,
-                                 num_epochs: int) -> float:
+                                 num_epochs: int):
     """
     uncertainty-weighted sampling으로 residual 모델 학습.
     Target: buffer의 dhat — DOB disturbance estimate (7D).
+
+    Returns: (loss_avg, sampled_uncert_avg)
     """
     res_net.train()
     valid_len = real_buffer.length
@@ -24,8 +26,9 @@ def train_residual_dx_model_dob(res_net, optimizer,
     weights    = uncert_mag + 1e-3
     probs      = weights / weights.sum()
 
-    loss_sum = 0.0
-    loss_ct  = 0
+    loss_sum          = 0.0
+    loss_ct           = 0
+    sampled_uncert_sum = 0.0
 
     for _ in range(num_epochs):
         num_iterations = valid_len // mini_batch_size
@@ -44,10 +47,13 @@ def train_residual_dx_model_dob(res_net, optimizer,
             loss.backward()
             optimizer.step()
 
-            loss_sum += loss.item()
-            loss_ct  += 1
+            loss_sum           += loss.item()
+            loss_ct            += 1
+            sampled_uncert_sum += float(uncert_mag[idx].mean())
 
-    return loss_sum / max(1, loss_ct)
+    loss_avg          = loss_sum / max(1, loss_ct)
+    sampled_uncert_avg = sampled_uncert_sum / max(1, loss_ct)
+    return loss_avg, sampled_uncert_avg
 
 
 def train_uncertainty_rbf(uncert_model, optimizer, real_buffer,

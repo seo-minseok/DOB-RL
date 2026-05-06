@@ -2,6 +2,7 @@
 trainer.py — DOB-MBRL BipedalWalker 메인 루프 (TD3 + resume 지원)
 DQN (discrete) → TD3 (Twin Delayed DDPG, continuous action) 전환.
 """
+import csv
 import os
 import numpy as np
 import torch
@@ -16,7 +17,7 @@ from ..models import ActorNetwork, QNetwork, ResidualDxNet, NormalizedRBFModel
 from ..utils.buffer import ReplayBufferDOB
 from ..dynamics import (
     default_bipedalwalker_params, step_nominal_bipedalwalker,
-    FPINV, DOB_DIM, OBS_DIM, ACT_DIM,
+    FPINV, F_MAT, DOB_DIM, OBS_DIM, ACT_DIM,
 )
 from ..envs.bipedalwalker_utils import (
     make_bipedalwalker_env, reset_env, step_env,
@@ -34,7 +35,8 @@ def train_DOB_core(run_idx: int,
                    result_queue=None,
                    checkpoint_dir: str = '.',
                    resume: bool = False,
-                   cfg: DOBMBRLConfig = None):
+                   cfg: DOBMBRLConfig = None,
+                   results_dir: str = None):
     """
     Args
     ----
@@ -129,14 +131,23 @@ def train_DOB_core(run_idx: int,
     # --- Main Training Loop ---
     for episode_ct in range(start_episode, num_episodes + 1):
 
+        ep_res_net_loss       = float('nan')
+        ep_rbf_loss           = float('nan')
+        ep_buffer_uncert_avg  = float('nan')
+        ep_sampled_uncert_avg = float('nan')
+
         # [Phase 1] Model Training & Rollout
         if real_buffer.length > cfg.mini_batch_size and total_step_ct > cfg.warm_start_samples:
             if cfg.real_ratio < 1.0:
-                train_residual_dx_model_dob(
+                valid_len = real_buffer.length
+                ep_buffer_uncert_avg = float(
+                    np.linalg.norm(real_buffer.uncertainty[:valid_len], axis=1).mean()
+                )
+                ep_res_net_loss, ep_sampled_uncert_avg = train_residual_dx_model_dob(
                     res_net, res_net_opt, real_buffer,
                     cfg.mini_batch_size, cfg.num_epochs
                 )
-                train_uncertainty_rbf(
+                ep_rbf_loss = train_uncertainty_rbf(
                     uncert_model, rbf_opt, real_buffer, res_net,
                     cfg.mini_batch_size, 5
                 )
@@ -152,6 +163,11 @@ def train_DOB_core(run_idx: int,
         obs_t          = torch.tensor(obs).unsqueeze(0)
         episode_reward = 0.0
         dhat           = np.zeros(DOB_DIM, dtype=np.float32)   # 에피소드마다 리셋
+        ep_nominal_errors   = []
+        ep_residual_errors  = []
+        ep_dhat_norms       = []
+        ep_uncertainty_mags = []
+        ep_td_losses        = []
 
         # [Phase 3] Environment Interaction
         for step_ct in range(1, cfg.max_steps_per_ep + 1):
@@ -159,7 +175,6 @@ def train_DOB_core(run_idx: int,
 
             # --- Action Selection (TD3 탐색) ---
             if total_step_ct <= cfg.warm_start_samples:
-                # warm-up: 완전 무작위 행동
                 action = np.random.uniform(-1.0, 1.0, size=num_act_features).astype(np.float32)
             else:
                 with torch.no_grad():
@@ -170,7 +185,7 @@ def train_DOB_core(run_idx: int,
             # --- Env Step ---
             next_obs_raw, env_reward, is_done, _ = step_env(env, action)
             next_obs = np.array(next_obs_raw, dtype=np.float32)
-            reward   = float(env_reward)   # env 보상 직접 사용
+            reward   = float(env_reward)
 
             # --- DOB Online Update ---
             if use_nominal:
@@ -198,6 +213,11 @@ def train_DOB_core(run_idx: int,
                 dhat = np.zeros(DOB_DIM, dtype=np.float32)
 
             uncertainty = FPINV @ e - dx_res   # (7,)
+
+            ep_nominal_errors.append(float(np.linalg.norm(e)))
+            ep_residual_errors.append(float(np.linalg.norm(e - F_MAT @ dx_res)))
+            ep_dhat_norms.append(float(np.linalg.norm(dhat)))
+            ep_uncertainty_mags.append(float(np.linalg.norm(uncertainty)))
 
             real_buffer.store(
                 obs         = obs,
@@ -262,6 +282,8 @@ def train_DOB_core(run_idx: int,
                     torch.nn.utils.clip_grad_norm_(critic2.parameters(), 1.0)
                     critic2_opt.step()
 
+                    ep_td_losses.append((loss_c1.item() + loss_c2.item()) / 2.0)
+
                     # --- Actor 업데이트 (policy_delay) ---
                     if total_grad_steps % cfg.policy_delay == 0:
                         actor_loss = -critic1(obs_bt, actor(obs_bt)).mean()
@@ -270,7 +292,6 @@ def train_DOB_core(run_idx: int,
                         torch.nn.utils.clip_grad_norm_(actor.parameters(), 1.0)
                         actor_opt.step()
 
-                        # Soft update all target networks
                         _soft_update(actor,   target_actor,   cfg.tau)
                         _soft_update(critic1, target_critic1, cfg.tau)
                         _soft_update(critic2, target_critic2, cfg.tau)
@@ -278,8 +299,46 @@ def train_DOB_core(run_idx: int,
             if is_done:
                 break
 
+        ep_metrics = {
+            'nominal_error_avg':   float(np.mean(ep_nominal_errors))   if ep_nominal_errors   else float('nan'),
+            'residual_error_avg':  float(np.mean(ep_residual_errors))  if ep_residual_errors  else float('nan'),
+            'dhat_norm_avg':       float(np.mean(ep_dhat_norms))       if ep_dhat_norms       else float('nan'),
+            'uncertainty_avg':     float(np.mean(ep_uncertainty_mags)) if ep_uncertainty_mags else float('nan'),
+            'res_net_loss':        ep_res_net_loss,
+            'rbf_loss':            ep_rbf_loss,
+            'td_loss_avg':         float(np.mean(ep_td_losses)) if ep_td_losses else float('nan'),
+            'episode_length':      step_ct,
+            'expl_noise':          cfg.expl_noise,
+            'buffer_uncert_avg':   ep_buffer_uncert_avg,
+            'sampled_uncert_avg':  ep_sampled_uncert_avg,
+        }
+
         episode_cumulative_reward_vector.append(episode_reward)
         episode_step_vector.append(total_step_ct)
+
+        # --- Per-episode incremental CSV save ---
+        if results_dir is not None:
+            os.makedirs(results_dir, exist_ok=True)
+            csv_path     = os.path.join(results_dir, f'seed_{run_idx}_progress.csv')
+            write_header = not os.path.exists(csv_path)
+            with open(csv_path, 'w' if write_header else 'a', newline='') as f:
+                writer = csv.writer(f)
+                if write_header:
+                    writer.writerow([
+                        'seed', 'episode', 'total_steps', 'reward',
+                        'nominal_error_avg', 'residual_error_avg', 'dhat_norm_avg',
+                        'uncertainty_avg', 'res_net_loss', 'rbf_loss', 'td_loss_avg',
+                        'episode_length', 'expl_noise', 'buffer_uncert_avg', 'sampled_uncert_avg',
+                    ])
+                writer.writerow([
+                    run_idx, episode_ct, total_step_ct, episode_reward,
+                    ep_metrics['nominal_error_avg'], ep_metrics['residual_error_avg'],
+                    ep_metrics['dhat_norm_avg'], ep_metrics['uncertainty_avg'],
+                    ep_metrics['res_net_loss'], ep_metrics['rbf_loss'],
+                    ep_metrics['td_loss_avg'], ep_metrics['episode_length'],
+                    ep_metrics['expl_noise'], ep_metrics['buffer_uncert_avg'],
+                    ep_metrics['sampled_uncert_avg'],
+                ])
 
         if result_queue is not None:
             result_queue.put({
@@ -287,6 +346,7 @@ def train_DOB_core(run_idx: int,
                 'ep_idx' : episode_ct,
                 'reward' : episode_reward,
                 'step'   : total_step_ct,
+                **ep_metrics,
             })
 
         # --- Checkpoint (10-ep avg 기준, 새 best마다 저장) ---

@@ -36,10 +36,30 @@ class NormalizedRBFModel(nn.Module):
         Returns (batch, 7) — uncertainty per velocity component
         """
         x_norm   = (2.0 * (x - self.phys_min) / (self.phys_max - self.phys_min) - 1.0)
-        c_sq     = (self.centers ** 2).sum(dim=0)           # (K,)
-        x_sq     = (x_norm ** 2).sum(dim=1)                 # (batch,)
-        cross    = x_norm @ self.centers                     # (batch, K)
-        dist_sq  = c_sq.unsqueeze(0) + x_sq.unsqueeze(1) - 2.0 * cross
+        # ------------------------------------------------------------
+        # Compute squared Euclidean distance between x and each center
+        #
+        # We use the identity:
+        #   ||x - c||^2 = ||x||^2 + ||c||^2 - 2 x^T c
+        #
+        # This allows efficient vectorized computation without explicit loops.
+        #
+        # Shapes:
+        #   x_norm        : (batch, D)
+        #   centers       : (D, K)
+        #   result dist_sq: (batch, K)
+        #
+        # Meaning:
+        #   dist_sq[b, i] = squared distance between x[b] and center c_i
+        # ------------------------------------------------------------
+
+        c_sq  = (self.centers ** 2).sum(dim=0)   # (K,)      -> ||c_i||^2
+        x_sq  = (x_norm ** 2).sum(dim=1)         # (batch,)  -> ||x||^2
+        cross = x_norm @ self.centers            # (batch,K) -> x^T c_i
+
+        # Apply: ||x - c_i||^2 = ||x||^2 + ||c_i||^2 - 2 x^T c_i
+        dist_sq = c_sq.unsqueeze(0) + x_sq.unsqueeze(1) - 2.0 * cross
+        
         phi      = torch.exp(-dist_sq / (2.0 * self.width ** 2))
         phi_norm = phi / (phi.sum(dim=1, keepdim=True) + 1e-8)
         return phi_norm @ self.weights.t()                   # (batch, 7)

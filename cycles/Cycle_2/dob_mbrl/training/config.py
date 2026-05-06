@@ -48,7 +48,7 @@ class DOBMBRLConfig:
 
     # Rollout
     max_horizon_length: int              = 10
-    uncertainty_threshold: float         = 0.1
+    uncertainty_threshold: float         = 0.7
     num_generate_sample_iteration: int   = 20
     epsilon_min_model: float             = 0.1   # model rollout 탐색 노이즈 std
 
