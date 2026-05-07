@@ -260,6 +260,56 @@ def plot_single_seed(log_path: str, figures_dir: str):
         save_figure(fig, os.path.join(figures_dir, 'reward_smoothed.png'))
 
 
+def plot_per_seed_dir(ratio_dir: str, figures_base_dir: str):
+    """ratio_dir 내 각 seed를 개별 figure로 저장 → figures_base_dir/seed_N/"""
+    import glob
+    csv_paths = sorted(glob.glob(os.path.join(ratio_dir, 'seed_*_progress.csv')))
+    if not csv_paths:
+        print(f'No progress CSVs found in {ratio_dir}')
+        return
+
+    ratio_label = os.path.basename(ratio_dir.rstrip('/\\'))
+
+    for p in csv_paths:
+        seed_id = int(os.path.basename(p).split('_')[1])
+        figures_dir = os.path.join(figures_base_dir, f'seed_{seed_id}')
+        os.makedirs(figures_dir, exist_ok=True)
+
+        seed_data = defaultdict(list)
+        with open(p, newline='') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                for k, v in row.items():
+                    if k == 'seed':
+                        continue
+                    try:
+                        seed_data[k].append(float(v) if v not in ('nan', '', 'None') else float('nan'))
+                    except ValueError:
+                        seed_data[k].append(float('nan'))
+
+        print(f'Plotting seed {seed_id} from {ratio_dir}')
+
+        for col, (ylabel, title, _) in METRIC_META.items():
+            vals = np.array(seed_data.get(col, []))
+            if len(vals) == 0 or np.all(np.isnan(vals)):
+                print(f'  Skip {col}: all NaN')
+                continue
+
+            eps = np.arange(1, len(vals) + 1)
+            fig, ax = plt.subplots(1, 1, figsize=(10, 5), facecolor='white')
+            ax.plot(eps, vals, color='steelblue', linewidth=1.5, label=f'Seed {seed_id}')
+            if col == 'reward':
+                ax.axhline(y=500, color='red', linestyle='--', linewidth=1.5, label='Target (500)')
+            elif col == 'episode_length':
+                ax.axhline(y=500, color='red', linestyle='--', linewidth=1.5, label='500')
+            ax.set_xlabel('Episode', fontsize=12, fontweight='bold')
+            ax.set_ylabel(ylabel, fontsize=12, fontweight='bold')
+            ax.set_title(f'{title} [{ratio_label}] (Seed {seed_id})', fontsize=13, fontweight='bold')
+            ax.legend()
+            ax.grid(True)
+            save_figure(fig, os.path.join(figures_dir, f'{col}.png'))
+
+
 def main():
     parser = argparse.ArgumentParser(description='DOB-MBRL plot results')
     parser.add_argument('--csv', type=str, default=None,
@@ -272,13 +322,18 @@ def main():
                         help='단일 시드 번호')
     parser.add_argument('--figures-dir', type=str, default=None,
                         help='figure 저장 디렉토리')
+    parser.add_argument('--per-seed', action='store_true',
+                        help='시드별 개별 figure 생성 (figures_dir/seed_N/)')
     args = parser.parse_args()
 
     if args.ratio_dir:
         ratio_name = os.path.basename(args.ratio_dir.rstrip('/\\'))
         figures_dir = args.figures_dir or os.path.join(
             os.path.dirname(os.path.dirname(args.ratio_dir)), 'figures', ratio_name)
-        plot_ratio_dir(args.ratio_dir, figures_dir)
+        if args.per_seed:
+            plot_per_seed_dir(args.ratio_dir, figures_dir)
+        else:
+            plot_ratio_dir(args.ratio_dir, figures_dir)
     elif args.csv:
         figures_dir = args.figures_dir or os.path.join(
             os.path.dirname(os.path.dirname(args.csv)), 'figures', 'baseline')

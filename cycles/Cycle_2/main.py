@@ -7,6 +7,8 @@ Usage:
   python main.py --checkpoint-dir ./checkpoints --seed 1 --uncertainty-threshold 0.3
 """
 import argparse
+import dataclasses
+import json
 import os
 
 from dob_mbrl.training import train_DOB_core, DOBMBRLConfig
@@ -46,6 +48,12 @@ def main():
     _here = os.path.dirname(os.path.abspath(__file__))
     results_dir = os.path.join(_here, 'results', run_name)
     os.makedirs(results_dir, exist_ok=True)
+
+    config_path = os.path.join(results_dir, 'config.json')
+    if not os.path.exists(config_path):
+        with open(config_path, 'w') as f:
+            json.dump(dataclasses.asdict(cfg), f, indent=2)
+        print(f'[main] config saved → {config_path}')
 
     print(f'[main] seed={args.seed}  real_ratio={cfg.real_ratio}  uncertainty_threshold={cfg.uncertainty_threshold}  checkpoint_dir={args.checkpoint_dir}  resume={args.resume}')
     print(f'[main] results_dir={results_dir}')
