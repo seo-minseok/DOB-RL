@@ -93,6 +93,7 @@ def train_uncertainty_rbf(uncert_model, optimizer, real_buffer,
     e_all        = dx_real_all - dx_nom_all            # (N, 4)
     fpinv_e      = e_all @ FPINV.T                     # (N, 2)
     fresh_uncert = fpinv_e - dx_res_all                # (N, 2)
+    fresh_uncert_avg = float(np.linalg.norm(fresh_uncert, axis=1).mean())
 
     loss_sum = 0.0
     ct       = 0
@@ -118,4 +119,4 @@ def train_uncertainty_rbf(uncert_model, optimizer, real_buffer,
             loss_sum += loss.item()
             ct       += 1
 
-    return loss_sum / max(1, ct)
+    return loss_sum / max(1, ct), fresh_uncert_avg

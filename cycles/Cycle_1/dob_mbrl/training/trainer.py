@@ -113,10 +113,12 @@ def train_DOB_core(run_idx: int,
     for episode_ct in range(start_episode, num_episodes + 1):
 
         # Per-episode metric collectors
-        ep_res_net_loss      = float('nan')
-        ep_rbf_loss          = float('nan')
-        ep_buffer_uncert_avg = float('nan')
+        ep_res_net_loss       = float('nan')
+        ep_rbf_loss           = float('nan')
+        ep_buffer_uncert_avg  = float('nan')
         ep_sampled_uncert_avg = float('nan')
+        ep_fresh_uncert_avg   = float('nan')
+        ep_rollout_uncert_avg = float('nan')
 
         # [Phase 1] Model Training & Rollout
         if real_buffer.length > cfg.mini_batch_size and total_step_ct > cfg.warm_start_samples:
@@ -130,12 +132,12 @@ def train_DOB_core(run_idx: int,
                     cfg.mini_batch_size, cfg.num_epochs,
                     use_uncertainty_sampling=cfg.use_uncertainty_sampling,
                 )
-                ep_rbf_loss = train_uncertainty_rbf(
+                ep_rbf_loss, ep_fresh_uncert_avg = train_uncertainty_rbf(
                     uncert_model, rbf_opt, real_buffer, res_net,
                     cfg.mini_batch_size, 5
                 )
                 model_trained_at_least_once = True
-                model_buffer = generate_samples_dob(
+                model_buffer, ep_rollout_uncert_avg = generate_samples_dob(
                     real_buffer, model_buffer, res_net, uncert_model,
                     q_network, epsilon, sample_gen_options, p_nom, use_nominal
                 )
@@ -272,6 +274,8 @@ def train_DOB_core(run_idx: int,
             'epsilon':             float(epsilon),
             'buffer_uncert_avg':   ep_buffer_uncert_avg,
             'sampled_uncert_avg':  ep_sampled_uncert_avg,
+            'fresh_uncert_avg':    ep_fresh_uncert_avg,
+            'rollout_uncert_avg':  ep_rollout_uncert_avg,
         }
         episode_metrics_list.append(ep_metrics)
 

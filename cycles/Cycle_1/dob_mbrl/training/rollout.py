@@ -19,6 +19,9 @@ def generate_samples_dob(real_buffer, model_buffer,
     Rollout with per-step uncertainty gating.
     h==0 (첫 번째 step)에서는 항상 신뢰 가능으로 처리.
     ResidualDxNet과 NormalizedRBFModel은 이 함수 안에서 동결 (no_grad).
+
+    Returns: (model_buffer, rollout_uncert_avg)
+      rollout_uncert_avg: rollout 중 계산된 uncert_mag_arr 의 전체 평균
     """
     max_horizon      = options['max_horizon_length']
     uncert_threshold = options['uncertainty_threshold']
@@ -26,9 +29,13 @@ def generate_samples_dob(real_buffer, model_buffer,
     B                = options['mini_batch_size']
     eps_model        = max(epsilon, options['epsilon_min_model'])
 
+    uncert_total = 0.0
+    uncert_count = 0
+
     for _ in range(num_iter):
         if real_buffer.length < B:
-            return model_buffer
+            rollout_uncert_avg = uncert_total / uncert_count if uncert_count > 0 else float('nan')
+            return model_buffer, rollout_uncert_avg
 
         idx         = np.random.randint(0, real_buffer.length, size=B)
         current_obs = torch.tensor(real_buffer.obs[idx])   # (B, 4)
@@ -55,6 +62,10 @@ def generate_samples_dob(real_buffer, model_buffer,
             with torch.no_grad():
                 pred_uncert  = uncert_model(inp_rbf).cpu().numpy()  # (n_alive, 2)
             uncert_mag_arr   = np.linalg.norm(pred_uncert, axis=1)  # (n_alive,)
+
+            uncert_total += float(uncert_mag_arr.mean())
+            uncert_count += 1
+
             is_reliable      = uncert_mag_arr < uncert_threshold
 
             if h == 0:
@@ -82,7 +93,8 @@ def generate_samples_dob(real_buffer, model_buffer,
                 to_update = reliable_idx[not_done]
                 current_obs[to_update] = torch.tensor(rel_next[not_done])
 
-    return model_buffer
+    rollout_uncert_avg = uncert_total / uncert_count if uncert_count > 0 else float('nan')
+    return model_buffer, rollout_uncert_avg
 
 
 def sample_mixed_minibatch(model_trained: bool, real_ratio: float,
