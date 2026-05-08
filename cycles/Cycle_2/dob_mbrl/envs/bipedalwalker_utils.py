@@ -21,8 +21,13 @@ except ModuleNotFoundError:
 
 def reward_is_done_function(next_obs: np.ndarray):
     """
-    Model rollout용 근사 보상함수 (vel_x 기반 forward progress proxy).
+    Model rollout용 근사 보상함수.
     Returns (reward, is_done) — 둘 다 (batch,) numpy array.
+
+    계수 0.72 유도:
+      gymnasium obs[2] = 0.3 * vel_x * (VIEWPORT_W/SCALE) / FPS = 0.12 * vel_x
+      gymnasium shaping = 130 * pos_x / SCALE  →  Δshaping/step = 130/30 * (obs[2]/6) ≈ 0.722 * obs[2]
+    fall penalty -100: 실제 환경 game_over 시 reward = -100
     """
     import torch
     if isinstance(next_obs, torch.Tensor):
@@ -31,13 +36,13 @@ def reward_is_done_function(next_obs: np.ndarray):
     if next_obs.ndim == 1:
         next_obs = next_obs.reshape(1, -1)
 
-    vel_x      = next_obs[:, 2]
-    hull_angle = next_obs[:, 0]
+    vel_x      = next_obs[:, 2]   # normalized horizontal velocity (obs[2] = 0.12 * real vel_x)
+    hull_angle = next_obs[:, 0]   # hull angle (rad, 0 = upright)
 
-    reward  = np.clip(vel_x, -5.0, 5.0).astype(np.float32) * np.float32(0.05)
-    is_done = np.abs(hull_angle) > np.float32(1.4)   # 너무 기울어지면 종료
-    reward  = np.where(is_done, np.float32(-5.0), reward)
-    return reward, is_done
+    reward  = np.float32(0.72) * vel_x
+    is_done = np.abs(hull_angle) > np.float32(1.4)
+    reward  = np.where(is_done, np.float32(-100.0), reward)
+    return reward.astype(np.float32), is_done
 
 
 def make_bipedalwalker_env():

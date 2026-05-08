@@ -105,3 +105,44 @@ def train_uncertainty_rbf(uncert_model, optimizer, real_buffer,
             ct       += 1
 
     return loss_sum / max(1, ct)
+
+
+def evaluate_rbf_calibration(uncert_model, real_buffer,
+                              sample_size: int = 4096):
+    """
+    real_buffer 샘플에서 RBF 예측 uncertainty와 실제 uncertainty를 비교한다.
+
+    Returns
+    -------
+    calib_ratio : mean(||RBF pred||₂) / mean(||actual||₂)
+                  1.0이면 스케일 일치, <1이면 under-predict, >1이면 over-predict
+    calib_corr  : Pearson correlation(pred_mag, actual_mag)
+                  1.0에 가까울수록 RBF가 고-uncertainty 상태를 올바르게 식별
+    """
+    valid_len = real_buffer.length
+    if valid_len == 0:
+        return float('nan'), float('nan')
+
+    n   = min(valid_len, sample_size)
+    idx = np.random.choice(valid_len, size=n, replace=False)
+
+    obs           = real_buffer.obs[idx]
+    act           = real_buffer.act[idx]
+    actual_uncert = real_buffer.uncertainty[idx]   # (n, 7)
+
+    uncert_model.eval()
+    with torch.no_grad():
+        inp  = torch.tensor(np.concatenate([obs, act], axis=-1))
+        pred = uncert_model(inp).cpu().numpy()     # (n, 7)
+
+    pred_mag   = np.linalg.norm(pred,           axis=1)   # (n,)
+    actual_mag = np.linalg.norm(actual_uncert,  axis=1)   # (n,)
+
+    calib_ratio = float(pred_mag.mean() / (actual_mag.mean() + 1e-8))
+
+    if pred_mag.std() < 1e-8 or actual_mag.std() < 1e-8:
+        calib_corr = float('nan')
+    else:
+        calib_corr = float(np.corrcoef(pred_mag, actual_mag)[0, 1])
+
+    return calib_ratio, calib_corr

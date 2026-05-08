@@ -3,6 +3,7 @@ trainer.py — DOB-MBRL BipedalWalker 메인 루프 (TD3 + resume 지원)
 DQN (discrete) → TD3 (Twin Delayed DDPG, continuous action) 전환.
 """
 import csv
+import dataclasses
 import os
 import numpy as np
 import torch
@@ -11,7 +12,7 @@ import torch.optim as optim
 from copy import deepcopy
 
 from .config import DOBMBRLConfig
-from .model_learning import train_residual_dx_model_dob, train_uncertainty_rbf
+from .model_learning import train_residual_dx_model_dob, train_uncertainty_rbf, evaluate_rbf_calibration
 from .rollout import generate_samples_dob, sample_mixed_minibatch
 from ..models import ActorNetwork, QNetwork, ResidualDxNet, NormalizedRBFModel
 from ..utils.buffer import ReplayBufferDOB
@@ -136,6 +137,10 @@ def train_DOB_core(run_idx: int,
         ep_buffer_uncert_avg   = float('nan')
         ep_sampled_uncert_avg  = float('nan')
         ep_rollout_uncert_avg  = float('nan')
+        ep_rollout_pass_rate   = float('nan')
+        ep_rollout_avg_horizon = float('nan')
+        ep_rbf_calib_ratio     = float('nan')
+        ep_rbf_calib_corr      = float('nan')
 
         # [Phase 1] Model Training & Rollout
         if real_buffer.length > cfg.mini_batch_size and total_step_ct > cfg.warm_start_samples:
@@ -152,8 +157,14 @@ def train_DOB_core(run_idx: int,
                     uncert_model, rbf_opt, real_buffer, res_net,
                     cfg.mini_batch_size, 5
                 )
+                ep_rbf_calib_ratio, ep_rbf_calib_corr = evaluate_rbf_calibration(
+                    uncert_model, real_buffer
+                )
                 model_trained_at_least_once = True
-                model_buffer, ep_rollout_uncert_avg = generate_samples_dob(
+                (model_buffer,
+                 ep_rollout_uncert_avg,
+                 ep_rollout_pass_rate,
+                 ep_rollout_avg_horizon) = generate_samples_dob(
                     real_buffer, model_buffer, res_net, uncert_model,
                     actor, cfg.epsilon_min_model, sample_gen_options,
                     p_nom, use_nominal
@@ -301,18 +312,22 @@ def train_DOB_core(run_idx: int,
                 break
 
         ep_metrics = {
-            'nominal_error_avg':   float(np.mean(ep_nominal_errors))   if ep_nominal_errors   else float('nan'),
-            'residual_error_avg':  float(np.mean(ep_residual_errors))  if ep_residual_errors  else float('nan'),
-            'dhat_norm_avg':       float(np.mean(ep_dhat_norms))       if ep_dhat_norms       else float('nan'),
-            'uncertainty_avg':     float(np.mean(ep_uncertainty_mags)) if ep_uncertainty_mags else float('nan'),
-            'res_net_loss':        ep_res_net_loss,
-            'rbf_loss':            ep_rbf_loss,
-            'td_loss_avg':         float(np.mean(ep_td_losses)) if ep_td_losses else float('nan'),
-            'episode_length':      step_ct,
-            'expl_noise':          cfg.expl_noise,
+            'nominal_error_avg':    float(np.mean(ep_nominal_errors))   if ep_nominal_errors   else float('nan'),
+            'residual_error_avg':   float(np.mean(ep_residual_errors))  if ep_residual_errors  else float('nan'),
+            'dhat_norm_avg':        float(np.mean(ep_dhat_norms))       if ep_dhat_norms       else float('nan'),
+            'uncertainty_avg':      float(np.mean(ep_uncertainty_mags)) if ep_uncertainty_mags else float('nan'),
+            'res_net_loss':         ep_res_net_loss,
+            'rbf_loss':             ep_rbf_loss,
+            'td_loss_avg':          float(np.mean(ep_td_losses)) if ep_td_losses else float('nan'),
+            'episode_length':       step_ct,
+            'expl_noise':           cfg.expl_noise,
             'buffer_uncert_avg':    ep_buffer_uncert_avg,
             'sampled_uncert_avg':   ep_sampled_uncert_avg,
             'rollout_uncert_avg':   ep_rollout_uncert_avg,
+            'rollout_pass_rate':    ep_rollout_pass_rate,
+            'rollout_avg_horizon':  ep_rollout_avg_horizon,
+            'rbf_calib_ratio':      ep_rbf_calib_ratio,
+            'rbf_calib_corr':       ep_rbf_calib_corr,
         }
 
         episode_cumulative_reward_vector.append(episode_reward)
@@ -332,6 +347,8 @@ def train_DOB_core(run_idx: int,
                         'uncertainty_avg', 'res_net_loss', 'rbf_loss', 'td_loss_avg',
                         'episode_length', 'expl_noise', 'buffer_uncert_avg',
                         'sampled_uncert_avg', 'rollout_uncert_avg',
+                        'rollout_pass_rate', 'rollout_avg_horizon',
+                        'rbf_calib_ratio', 'rbf_calib_corr',
                     ])
                 writer.writerow([
                     run_idx, episode_ct, total_step_ct, episode_reward,
@@ -341,6 +358,8 @@ def train_DOB_core(run_idx: int,
                     ep_metrics['td_loss_avg'], ep_metrics['episode_length'],
                     ep_metrics['expl_noise'], ep_metrics['buffer_uncert_avg'],
                     ep_metrics['sampled_uncert_avg'], ep_metrics['rollout_uncert_avg'],
+                    ep_metrics['rollout_pass_rate'], ep_metrics['rollout_avg_horizon'],
+                    ep_metrics['rbf_calib_ratio'], ep_metrics['rbf_calib_corr'],
                 ])
 
         if result_queue is not None:
@@ -367,6 +386,7 @@ def train_DOB_core(run_idx: int,
                     'total_steps'     : total_step_ct,
                     'total_grad_steps': total_grad_steps,
                     'episode'         : episode_ct,
+                    'config'          : dataclasses.asdict(cfg),
                 }, checkpoint_path)
                 print(f'[Seed {run_idx}] New best! Avg {current_avg:.1f} '
                       f'at ep {episode_ct} / step {total_step_ct}')

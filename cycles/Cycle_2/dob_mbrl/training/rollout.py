@@ -20,6 +20,13 @@ def generate_samples_dob(real_buffer, model_buffer,
 
     actor        : ActorNetwork (연속 행동 출력)
     rollout_noise: 탐색 노이즈 std (config.epsilon_min_model 재사용)
+
+    Returns
+    -------
+    model_buffer       : 갱신된 model_buffer
+    rollout_uncert_avg : 롤아웃 전 스텝(h=0 포함)의 RBF 예측 uncertainty 평균
+    rollout_pass_rate  : h>0 스텝에서 threshold를 통과한 샘플 비율 (0~1)
+    rollout_avg_horizon: trajectory당 평균 완료 스텝 수 (max=max_horizon_length)
     """
     max_horizon      = options['max_horizon_length']
     uncert_threshold = options['uncertainty_threshold']
@@ -28,6 +35,8 @@ def generate_samples_dob(real_buffer, model_buffer,
     noise_std        = max(rollout_noise, options['epsilon_min_model'])
 
     uncert_mag_all = []
+    pass_rate_vals = []   # h>0 스텝에서만 수집
+    horizon_counts = []   # iteration마다 trajectory별 완료 step 수
 
     for _ in range(num_iter):
         if real_buffer.length < B:
@@ -36,6 +45,7 @@ def generate_samples_dob(real_buffer, model_buffer,
         idx         = np.random.randint(0, real_buffer.length, size=B)
         current_obs = torch.tensor(real_buffer.obs[idx])   # (B, 24)
         alive_mask  = np.ones(B, dtype=bool)
+        traj_horizon = np.zeros(B, dtype=np.float32)       # 각 trajectory의 완료 스텝
 
         for h in range(max_horizon):
             n_alive = alive_mask.sum()
@@ -63,6 +73,8 @@ def generate_samples_dob(real_buffer, model_buffer,
 
             if h == 0:
                 is_reliable[:] = True
+            else:
+                pass_rate_vals.append(float(is_reliable.mean()))
 
             n_reliable = is_reliable.sum()
             if n_reliable == 0:
@@ -75,10 +87,11 @@ def generate_samples_dob(real_buffer, model_buffer,
 
             model_buffer.store_batch(rel_obs, rel_act, rel_next, rel_rew, rel_done)
 
-            alive_idx = np.where(alive_mask)[0]
+            alive_idx    = np.where(alive_mask)[0]
             alive_mask[alive_idx[~is_reliable]] = False
 
             reliable_idx = alive_idx[is_reliable]
+            traj_horizon[reliable_idx] += 1.0
             alive_mask[reliable_idx[rel_done]] = False
 
             not_done = ~rel_done
@@ -86,8 +99,12 @@ def generate_samples_dob(real_buffer, model_buffer,
                 to_update = reliable_idx[not_done]
                 current_obs[to_update] = torch.tensor(rel_next[not_done])
 
-    rollout_uncert_avg = float(np.concatenate(uncert_mag_all).mean()) if uncert_mag_all else float('nan')
-    return model_buffer, rollout_uncert_avg
+        horizon_counts.extend(traj_horizon.tolist())
+
+    rollout_uncert_avg  = float(np.concatenate(uncert_mag_all).mean()) if uncert_mag_all  else float('nan')
+    rollout_pass_rate   = float(np.mean(pass_rate_vals))                if pass_rate_vals  else float('nan')
+    rollout_avg_horizon = float(np.mean(horizon_counts))                if horizon_counts  else float('nan')
+    return model_buffer, rollout_uncert_avg, rollout_pass_rate, rollout_avg_horizon
 
 
 def sample_mixed_minibatch(model_trained: bool, real_ratio: float,
