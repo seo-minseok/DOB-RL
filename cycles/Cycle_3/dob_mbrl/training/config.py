@@ -41,9 +41,9 @@ class DOBMBRLConfig:
 
     # RBF
     num_rbf_centers: int     = 2000
-    rbf_width: float         = 3.65   # median heuristic: sqrt(18.5 / (2*ln2))
-    rbf_initial_value: float = 0.5    # 타겟 스케일(0.3~0.7)에 맞게 초기화
-    lr_rbf: float            = 0.01   # width 커지면 gradient 안정화 필요
+    rbf_width: float         = 1.0    # 실제 데이터 거리² ≈ 3~8 기준, phi ≈ 0.08~0.22 → localization 유지
+    rbf_initial_value: float = 1.0    # buffer_uncert_avg(≈1.4) 근접 초기화
+    lr_rbf: float            = 0.05   # sum normalization 기준 gradient 크기 조정
     lr_residual: float       = 1e-2
 
     # Rollout

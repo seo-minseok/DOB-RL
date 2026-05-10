@@ -40,7 +40,9 @@ def main():
 
     os.makedirs(args.checkpoint_dir, exist_ok=True)
 
-    if args.uncertainty_threshold is not None:
+    if args.uncertainty_threshold is not None and args.real_ratio is not None:
+        run_name = f'real_ratio={cfg.real_ratio}_uncert_thresh={cfg.uncertainty_threshold}'
+    elif args.uncertainty_threshold is not None:
         run_name = f'uncert_thresh={cfg.uncertainty_threshold}'
     else:
         run_name = f'real_ratio={cfg.real_ratio}'

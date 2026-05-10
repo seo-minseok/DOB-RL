@@ -61,5 +61,5 @@ class NormalizedRBFModel(nn.Module):
         dist_sq = c_sq.unsqueeze(0) + x_sq.unsqueeze(1) - 2.0 * cross
         
         phi      = torch.exp(-dist_sq / (2.0 * self.width ** 2))
-        phi_norm = phi / (phi.max(dim=1, keepdim=True).values + 1e-8)
+        phi_norm = phi / (phi.sum(dim=1, keepdim=True) + 1e-8)
         return phi_norm @ self.weights.t()                   # (batch, 7)
