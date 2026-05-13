@@ -1,0 +1,31 @@
+{
+  "num_episodes": 2000,
+  "max_steps_per_ep": 1600,
+  "warm_start_samples": 10000,
+  "lr_critic": 0.0003,
+  "discount_factor": 0.99,
+  "tau": 0.005,
+  "update_interval": 10,
+  "num_gradient_steps": 1,
+  "lr_actor": 0.0003,
+  "policy_delay": 2,
+  "expl_noise": 0.1,
+  "policy_noise": 0.2,
+  "noise_clip": 0.5,
+  "buffer_size": 1000000,
+  "mini_batch_size": 256,
+  "num_epochs": 5,
+  "real_ratio": 0.2,
+  "dob_w": 0.1,
+  "num_rbf_centers": 2000,
+  "rbf_width": 1.0,
+  "rbf_initial_value": 1.0,
+  "lr_rbf": 0.05,
+  "lr_residual": 0.01,
+  "max_horizon_length": 10,
+  "uncertainty_threshold": 0.5,
+  "num_generate_sample_iteration": 20,
+  "epsilon_min_model": 0.1
+}
+
+observation 변경 전 학습 결과 (contact 포함)
