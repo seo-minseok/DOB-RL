@@ -25,7 +25,7 @@ from ..utils.buffer import ReplayBuffer
 from ..envs.bipedalwalker_utils import (
     make_bipedalwalker_env, reset_env, step_env, reward_is_done_function,
 )
-from ..dynamics.constants import OBS_DIM, ACT_DIM
+from ..dynamics.constants import OBS_DIM, ACT_DIM, OBS_DIM_NAMES
 
 
 def _soft_update(src: nn.Module, tgt: nn.Module, tau: float):
@@ -288,6 +288,8 @@ def train_MBRL_core(run_idx: int,
                     actor, sample_gen_options, episode_ct,
                 )
                 model_trained = True
+                for tm in transition_models:
+                    tm.eval()
 
         # [Phase 2] Episode reset
         obs            = reset_env(env)
@@ -297,6 +299,8 @@ def train_MBRL_core(run_idx: int,
         ep_q1_vals     = []
         ep_q2_vals     = []
         ep_target_q    = []
+        ep_model_errors      = []
+        ep_model_err_per_dim = []
 
         # [Phase 3] Environment interaction
         for step_ct in range(1, cfg.max_steps_per_ep + 1):
@@ -312,6 +316,21 @@ def train_MBRL_core(run_idx: int,
 
             next_obs, env_reward, is_done, _ = step_env(env, action)
             reward = float(env_reward)
+
+            # Model prediction error (DOB-RL의 nominal_error_avg / nom_err_per_dim에 대응)
+            if model_trained:
+                dx_real      = next_obs - obs
+                act_t_inf    = torch.tensor(action).unsqueeze(0)
+                per_errs     = []
+                per_dim_errs = []
+                for tm in transition_models:
+                    with torch.no_grad():
+                        dx_pred = tm(obs_t, act_t_inf).cpu().numpy().flatten()
+                    diff = np.abs(dx_pred - dx_real).astype(np.float32)
+                    per_errs.append(float(np.linalg.norm(dx_pred - dx_real)))
+                    per_dim_errs.append(diff)
+                ep_model_errors.append(float(np.mean(per_errs)))
+                ep_model_err_per_dim.append(np.mean(per_dim_errs, axis=0).astype(np.float32))
 
             real_buffer.store(
                 obs      = obs,
@@ -393,17 +412,23 @@ def train_MBRL_core(run_idx: int,
             if is_done:
                 break
 
+        # --- Per-dim 집계 ---
+        _nan_dim         = [float('nan')] * OBS_DIM
+        model_err_per_dim = (np.mean(ep_model_err_per_dim, axis=0).tolist()
+                              if ep_model_err_per_dim else _nan_dim)
+
         # --- Episode metrics ---
         ep_metrics = {
-            'td_loss_avg'       : float(np.mean(ep_td_losses)) if ep_td_losses else float('nan'),
-            'model_loss_avg'    : ep_model_loss,
-            'horizon_length'    : ep_horizon,
-            'real_buffer_size'  : real_buffer.length,
-            'model_buffer_size' : model_buffer.length,
-            'q1_avg'            : float(np.mean(ep_q1_vals))  if ep_q1_vals  else float('nan'),
-            'q2_avg'            : float(np.mean(ep_q2_vals))  if ep_q2_vals  else float('nan'),
-            'target_q_avg'      : float(np.mean(ep_target_q)) if ep_target_q else float('nan'),
-            'episode_length'    : step_ct,
+            'td_loss_avg'         : float(np.mean(ep_td_losses))   if ep_td_losses    else float('nan'),
+            'model_loss_avg'      : ep_model_loss,
+            'horizon_length'      : ep_horizon,
+            'real_buffer_size'    : real_buffer.length,
+            'model_buffer_size'   : model_buffer.length,
+            'q1_avg'              : float(np.mean(ep_q1_vals))     if ep_q1_vals      else float('nan'),
+            'q2_avg'              : float(np.mean(ep_q2_vals))     if ep_q2_vals      else float('nan'),
+            'target_q_avg'        : float(np.mean(ep_target_q))    if ep_target_q     else float('nan'),
+            'episode_length'      : step_ct,
+            'model_pred_error_avg': float(np.mean(ep_model_errors)) if ep_model_errors else float('nan'),
         }
 
         episode_rewards.append(episode_reward)
@@ -422,6 +447,8 @@ def train_MBRL_core(run_idx: int,
                         'td_loss_avg', 'model_loss_avg', 'horizon_length',
                         'real_buffer_size', 'model_buffer_size',
                         'q1_avg', 'q2_avg', 'target_q_avg',
+                        'model_pred_error_avg',
+                        *[f'model_err_{n}' for n in OBS_DIM_NAMES],
                     ])
                 writer.writerow([
                     run_idx, episode_ct, total_step_ct, episode_reward,
@@ -434,6 +461,8 @@ def train_MBRL_core(run_idx: int,
                     ep_metrics['q1_avg'],
                     ep_metrics['q2_avg'],
                     ep_metrics['target_q_avg'],
+                    ep_metrics['model_pred_error_avg'],
+                    *model_err_per_dim,
                 ])
 
         # --- Checkpoint (10-ep avg 기준, 새 best마다 저장) ---

@@ -99,18 +99,31 @@ def plot_multiseed_csv(csv_path: str, figures_dir: str):
         save_figure(fig, os.path.join(figures_dir, fname))
 
 
+_OBS_NAMES = [
+    'hull_angle', 'hull_angvel', 'vel_x',       'vel_y',
+    'hip1_angle', 'hip1_speed',  'knee1_angle',  'knee1_speed',
+    'hip2_angle', 'hip2_speed',  'knee2_angle',  'knee2_speed',
+]
+
 METRIC_META = {
-    'reward':             ('Cumulative Reward',     'Episode Reward',            None),
-    'episode_length':     ('Steps',                 'Episode Length',            None),
-    'nominal_error_avg':  ('Error',                 'Nominal Error (avg)',       None),
-    'residual_error_avg': ('Error',                 'Residual Error (avg)',      None),
-    'dhat_norm_avg':      ('||d_hat||',             'DOB Estimate Norm (avg)',   None),
-    'uncertainty_avg':    ('Uncertainty',           'Uncertainty (avg)',         None),
-    'res_net_loss':       ('Loss',                  'ResNet Loss',               None),
-    'rbf_loss':           ('Loss',                  'RBF Loss',                  None),
-    'td_loss_avg':        ('TD Loss',               'TD Loss (avg)',             None),
-    'buffer_uncert_avg':  ('Uncertainty',           'Buffer Uncertainty (avg)',  None),
-    'sampled_uncert_avg': ('Uncertainty',           'Sampled Uncertainty (avg)', None),
+    'reward':              ('Cumulative Reward', 'Episode Reward',             None),
+    'episode_length':      ('Steps',             'Episode Length',             None),
+    'nominal_error_avg':   ('Error',             'Nominal Error (avg)',        None),
+    'residual_error_avg':  ('Error',             'Residual Error (avg)',       None),
+    'dhat_norm_avg':       ('||d_hat||',         'DOB Estimate Norm (avg)',    None),
+    'uncertainty_avg':     ('Uncertainty',       'Uncertainty (avg)',          None),
+    'res_net_loss':        ('Loss',              'ResNet Loss',                None),
+    'rbf_loss':            ('Loss',              'RBF Loss',                   None),
+    'td_loss_avg':         ('TD Loss',           'TD Loss (avg)',              None),
+    'buffer_uncert_avg':   ('Uncertainty',       'Buffer Uncertainty (avg)',   None),
+    'sampled_uncert_avg':  ('Uncertainty',       'Sampled Uncertainty (avg)',  None),
+    'rollout_uncert_avg':  ('Uncertainty',       'Rollout Uncertainty (avg)',  None),
+    'rollout_pass_rate':   ('Pass Rate',         'Rollout Pass Rate',          None),
+    'rollout_avg_horizon': ('Steps',             'Rollout Avg Horizon',        None),
+    'rbf_calib_ratio':     ('Ratio',             'RBF Calibration Ratio',      None),
+    'rbf_calib_corr':      ('Correlation',       'RBF Calibration Corr',       None),
+    **{f'nom_err_{n}': ('Abs Error', f'Nominal Error [{n}]',  None) for n in _OBS_NAMES},
+    **{f'res_err_{n}': ('Abs Error', f'Residual Error [{n}]', None) for n in _OBS_NAMES},
 }
 
 

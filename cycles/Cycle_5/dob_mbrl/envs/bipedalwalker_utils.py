@@ -5,14 +5,14 @@ reward_is_done_function: model rollout 전용 보상.
 실제 환경 상호작용에서는 env.step()의 reward/done을 직접 사용할 것.
 
 Cycle 5 obs 처리:
-  raw 24D → lidar 제거 → [:14] → contact(8, 13) 제거 → 12D
-  새 인덱스: [0,1,2,3,4,5,6,7, 9,10,11,12] (원본 기준)
+  raw 24D → lidar(14-23) 제거 → 14D (contact 포함)
+  인덱스: [0,1,2,3,4,5,6,7,8,9,10,11,12,13] (원본 기준)
 """
 import os
 import numpy as np
 
-# 원본 24D obs에서 lidar 제거 후 14D 중 유지할 인덱스 (contact 8, 13 제외)
-_OBS_KEEP = np.array([0, 1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12], dtype=np.int32)
+# 원본 24D obs에서 lidar(14-23) 제거 후 14D 전체 유지 (contact 8, 13 포함)
+_OBS_KEEP = np.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13], dtype=np.int32)
 
 if os.name == 'nt' and os.environ.get('MUJOCO_GL', '').lower() == 'egl':
     os.environ.pop('MUJOCO_GL', None)
@@ -91,7 +91,7 @@ def make_bipedalwalker_env():
 def reset_env(env) -> np.ndarray:
     reset_result = env.reset()
     obs = reset_result[0] if isinstance(reset_result, tuple) else reset_result
-    return np.asarray(obs, dtype=np.float32)[_OBS_KEEP]  # lidar + contact 제거 → 12D
+    return np.asarray(obs, dtype=np.float32)[_OBS_KEEP]  # lidar 제거 → 14D (contact 포함)
 
 
 def step_env(env, action) -> tuple:
@@ -105,4 +105,4 @@ def step_env(env, action) -> tuple:
         done = bool(done)
     else:
         raise RuntimeError(f"Unexpected env.step return length: {len(step_result)}")
-    return np.asarray(next_obs, dtype=np.float32)[_OBS_KEEP], reward, done, info  # lidar + contact 제거 → 12D
+    return np.asarray(next_obs, dtype=np.float32)[_OBS_KEEP], reward, done, info  # lidar 제거 → 14D (contact 포함)

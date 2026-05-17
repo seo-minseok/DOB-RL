@@ -27,5 +27,3 @@
   "num_generate_sample_iteration": 20,
   "epsilon_min_model": 0.1
 }
-
-observation 변경 전 학습 결과 (contact 포함)

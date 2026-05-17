@@ -44,7 +44,7 @@ def generate_samples_dob(real_buffer, model_buffer,
             break
 
         idx         = np.random.randint(0, real_buffer.length, size=B)
-        current_obs = torch.tensor(real_buffer.obs[idx])   # (B, 24)
+        current_obs = torch.tensor(real_buffer.obs[idx])   # (B, 14)
         alive_mask  = np.ones(B, dtype=bool)
         traj_horizon = np.zeros(B, dtype=np.float32)       # 각 trajectory의 완료 스텝
 
@@ -53,10 +53,10 @@ def generate_samples_dob(real_buffer, model_buffer,
             if n_alive == 0:
                 break
 
-            valid_obs = current_obs[alive_mask]   # (n_alive, 24)
+            valid_obs = current_obs[alive_mask]   # (n_alive, 14)
 
             with torch.no_grad():
-                valid_act_t = actor(valid_obs)    # (n_alive, 4), tanh ∈ [-1, 1]
+                valid_act_t = actor(valid_obs)    # (n_alive, 4)
             valid_act_np = valid_act_t.numpy()
 
             # 탐색 노이즈 추가 후 클리핑

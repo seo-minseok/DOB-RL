@@ -18,7 +18,7 @@ from ..models import ActorNetwork, QNetwork, ResidualDxNet, NormalizedRBFModel
 from ..utils.buffer import ReplayBufferDOB
 from ..dynamics import (
     default_bipedalwalker_params, step_nominal_bipedalwalker,
-    FPINV, F_MAT, DOB_DIM, OBS_DIM, ACT_DIM,
+    FPINV, F_MAT, DOB_DIM, OBS_DIM, ACT_DIM, OBS_DIM_NAMES,
 )
 from ..envs.bipedalwalker_utils import (
     make_bipedalwalker_env, reset_env, step_env,
@@ -60,7 +60,7 @@ def train_DOB_core(run_idx: int,
     torch.manual_seed(run_idx)
 
     env              = make_bipedalwalker_env()
-    num_observations = OBS_DIM   # 24
+    num_observations = OBS_DIM   # 14
     num_act_features = ACT_DIM   # 4
 
     p_nom       = default_bipedalwalker_params()
@@ -181,6 +181,8 @@ def train_DOB_core(run_idx: int,
         ep_dhat_norms       = []
         ep_uncertainty_mags = []
         ep_td_losses        = []
+        ep_nom_err_per_dim  = []   # list of (OBS_DIM,) abs error arrays
+        ep_res_err_per_dim  = []   # list of (OBS_DIM,) abs error arrays
 
         # [Phase 3] Environment Interaction
         for step_ct in range(1, cfg.max_steps_per_ep + 1):
@@ -219,7 +221,7 @@ def train_DOB_core(run_idx: int,
                 ).unsqueeze(0)
                 dx_res = res_net(inp_res).cpu().numpy().flatten()   # (7,)
 
-            e = dx_real - dx_nom   # (24,)
+            e = dx_real - dx_nom   # (14,)
             if use_dob:
                 dhat = cfg.dob_w * dx_res + (1.0 - cfg.dob_w) * (FPINV @ e)
             else:
@@ -231,6 +233,8 @@ def train_DOB_core(run_idx: int,
             ep_residual_errors.append(float(np.linalg.norm(e - F_MAT @ dx_res)))
             ep_dhat_norms.append(float(np.linalg.norm(dhat)))
             ep_uncertainty_mags.append(float(np.linalg.norm(uncertainty)))
+            ep_nom_err_per_dim.append(np.abs(e).astype(np.float32))
+            ep_res_err_per_dim.append(np.abs(e - F_MAT @ dx_res).astype(np.float32))
 
             real_buffer.store(
                 obs         = obs,
@@ -312,6 +316,10 @@ def train_DOB_core(run_idx: int,
             if is_done:
                 break
 
+        _nan_dim = [float('nan')] * OBS_DIM
+        nom_err_per_dim = np.mean(ep_nom_err_per_dim, axis=0).tolist() if ep_nom_err_per_dim else _nan_dim
+        res_err_per_dim = np.mean(ep_res_err_per_dim, axis=0).tolist() if ep_res_err_per_dim else _nan_dim
+
         ep_metrics = {
             'nominal_error_avg':    float(np.mean(ep_nominal_errors))   if ep_nominal_errors   else float('nan'),
             'residual_error_avg':   float(np.mean(ep_residual_errors))  if ep_residual_errors  else float('nan'),
@@ -350,6 +358,8 @@ def train_DOB_core(run_idx: int,
                         'sampled_uncert_avg', 'rollout_uncert_avg',
                         'rollout_pass_rate', 'rollout_avg_horizon',
                         'rbf_calib_ratio', 'rbf_calib_corr',
+                        *[f'nom_err_{n}' for n in OBS_DIM_NAMES],
+                        *[f'res_err_{n}' for n in OBS_DIM_NAMES],
                     ])
                 writer.writerow([
                     run_idx, episode_ct, total_step_ct, episode_reward,
@@ -361,6 +371,8 @@ def train_DOB_core(run_idx: int,
                     ep_metrics['sampled_uncert_avg'], ep_metrics['rollout_uncert_avg'],
                     ep_metrics['rollout_pass_rate'], ep_metrics['rollout_avg_horizon'],
                     ep_metrics['rbf_calib_ratio'], ep_metrics['rbf_calib_corr'],
+                    *nom_err_per_dim,
+                    *res_err_per_dim,
                 ])
 
         if result_queue is not None:

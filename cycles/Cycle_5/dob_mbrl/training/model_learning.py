@@ -1,7 +1,7 @@
 """
 model_learning.py — Residual Dynamics & Uncertainty RBF 모델 학습
 Rollout 중에는 호출되지 않음 — Phase 1(에피소드 시작 전)에서만 수행.
-BipedalWalker: FPINV는 (7, 24), dhat/uncertainty는 (N, 7).
+BipedalWalker: FPINV는 (7, 14), dhat/uncertainty는 (N, 7).
 """
 import numpy as np
 import torch
@@ -91,7 +91,7 @@ def train_uncertainty_rbf(uncert_model, optimizer, real_buffer, res_net,
             with torch.no_grad():
                 dx_res = res_net(inp_t)                                        # (batch, 7)
 
-            e       = nxt_t - obs_t - dxnom_t                                 # (batch, 24)
+            e       = nxt_t - obs_t - dxnom_t                                 # (batch, 14)
             fpinv_e = torch.tensor(
                 (e.numpy() @ FPINV.T).astype(np.float32))                     # (batch, 7)
             target_t = torch.abs(fpinv_e - dx_res)

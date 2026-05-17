@@ -14,7 +14,7 @@ def step_nominal_bipedalwalker(x: np.ndarray, u: np.ndarray, p: dict) -> np.ndar
     Kinematic nominal: position-like 상태들이 대응하는 velocity-like 상태로 적분.
     Zero acceleration 가정 — DOB와 residual net이 실제 동역학을 보정.
 
-    x : (..., 24)  BipedalWalker observation
+    x : (..., 14)  BipedalWalker observation (lidar 제거, contact 포함)
     u : (..., 4)   action (nominal에서 사용 안 함)
     Returns x_nom_next with same shape as x.
     """
@@ -26,9 +26,11 @@ def step_nominal_bipedalwalker(x: np.ndarray, u: np.ndarray, p: dict) -> np.ndar
     x_next[..., 4]  = x[..., 4]  + Ts * x[..., 5]
     # knee1_angle  += Ts * knee1_speed   (idx 6, 7)
     x_next[..., 6]  = x[..., 6]  + Ts * x[..., 7]
-    # hip2_angle   += Ts * hip2_speed    (idx 8, 9  — contact 제거 후 재매핑)
-    x_next[..., 8]  = x[..., 8]  + Ts * x[..., 9]
-    # knee2_angle  += Ts * knee2_speed   (idx 10, 11 — contact 제거 후 재매핑)
-    x_next[..., 10] = x[..., 10] + Ts * x[..., 11]
-    # velocities (1,2,3,5,7,9,11) 그대로
+    # left_contact (idx 8) — 그대로 복사 (x.copy()로 이미 처리됨)
+    # hip2_angle   += Ts * hip2_speed    (idx 9, 10)
+    x_next[..., 9]  = x[..., 9]  + Ts * x[..., 10]
+    # knee2_angle  += Ts * knee2_speed   (idx 11, 12)
+    x_next[..., 11] = x[..., 11] + Ts * x[..., 12]
+    # right_contact (idx 13) — 그대로 복사 (x.copy()로 이미 처리됨)
+    # velocities (1,2,3,5,7,10,12) 그대로
     return x_next
