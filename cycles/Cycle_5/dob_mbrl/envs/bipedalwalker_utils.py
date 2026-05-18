@@ -58,6 +58,11 @@ def reward_is_done_function(obs: np.ndarray,
       forward_incentive = _FWD_VEL_COEFF * obs[2] - _FWD_BASELINE
       - obs[2] 비례항: 전진 속도를 직접 보상 (후진 패널티 포함)
       - baseline 패널티: vel_x=0 시 매 step -_FWD_BASELINE → 서 있기가 항상 음수
+
+    is_done 조건 (실제 환경 game_over 근사):
+      (1) |hull_angle| > 1.4               — 옆으로 넘어짐
+      (2) vel_y < -0.3 AND |hull_angle|<0.5 — 수평 자세로 빠르게 주저앉기
+      (3) both_contact AND vel_y < -0.15   — 양발 접지 상태에서 몸통 하강
     """
     import torch
     def _to_np(x):
@@ -90,8 +95,24 @@ def reward_is_done_function(obs: np.ndarray,
     # - baseline: vel_x=0 이어도 매 step 소폭 음수로 만들어 제자리 균형점 파괴
     forward_incentive = _FWD_VEL_COEFF * obs[:, 2] - _FWD_BASELINE
 
-    reward  = d_pos_shaping + d_angle_shaping - motor_cost + forward_incentive
-    is_done = np.abs(next_obs[:, 0]) > np.float32(1.4)
+    reward = d_pos_shaping + d_angle_shaping - motor_cost + forward_incentive
+
+    # --- is_done 조건 ---
+    # (1) hull 각도 초과: 기존 조건
+    angle_fail = np.abs(next_obs[:, 0]) > np.float32(1.4)
+
+    # (2) 수평 자세로 주저앉기: hull이 수평(|angle|<0.5)이면서 빠르게 하강
+    #     obs[3] = 0.08 * vel_y; -0.3 ≈ vel_y = -3.75 m/s
+    squat_fail = ((next_obs[:, 3] < np.float32(-0.3)) &
+                  (np.abs(next_obs[:, 0]) < np.float32(0.5)))
+
+    # (3) 양발 접지 + hull 하강: 두 발이 땅에 붙은 채 몸통이 가라앉는 상태
+    #     obs[8]=left_contact, obs[13]=right_contact
+    ground_collapse = ((next_obs[:, 8]  > np.float32(0.5)) &
+                       (next_obs[:, 13] > np.float32(0.5)) &
+                       (next_obs[:, 3]  < np.float32(-0.15)))
+
+    is_done = angle_fail | squat_fail | ground_collapse
     reward  = np.where(is_done, np.float32(-100.0), reward)
     return reward.astype(np.float32), is_done
 
