@@ -1,0 +1,67 @@
+"""
+config.py — DOB-MBRL BipedalWalker TD3 하이퍼파라미터
+수정은 이 파일을 직접 편집. CLI override 없음.
+"""
+from dataclasses import dataclass
+
+
+@dataclass
+class DOBMBRLConfig:
+    # 학습 기본
+    num_episodes: int        = 2000
+    max_steps_per_ep: int    = 1600   # BipedalWalker-v3 기본 max steps
+    warm_start_samples: int  = 10000  # 무작위 탐색 후 학습 시작
+
+    # TD3 Critic
+    lr_critic: float         = 3e-4
+    discount_factor: float   = 0.99
+    tau: float               = 0.005          # soft-update coefficient
+    update_interval: int     = 10
+    num_gradient_steps: int  = 1              # UTD = 1
+
+    # TD3 Actor
+    lr_actor: float          = 3e-4
+    policy_delay: int        = 2              # 액터는 크리틱의 1/2 빈도로 업데이트
+
+    # TD3 Exploration / Target Policy Noise
+    expl_noise: float        = 0.1            # 탐색 노이즈 std (환경 상호작용)
+    policy_noise: float      = 0.2            # 타깃 정책 노이즈 std
+    noise_clip: float        = 0.5            # 타깃 정책 노이즈 클리핑 범위
+
+    # Buffer
+    buffer_size: int         = int(1e6)
+    mini_batch_size: int     = 256
+    num_epochs: int          = 5              # residual model training epochs
+
+    # Model mixing — Cycle 4: vanilla TD3 (모델 롤아웃 비활성화)
+    real_ratio: float        = 1.0
+
+    # DOB
+    dob_w: float             = 0.1
+
+    # RBF
+    num_rbf_centers: int     = 2000
+    rbf_width: float         = 1.0    # 실제 데이터 거리² ≈ 3~8 기준, phi ≈ 0.08~0.22 → localization 유지
+    rbf_initial_value: float = 1.0    # buffer_uncert_avg(≈1.4) 근접 초기화
+    lr_rbf: float            = 0.05   # sum normalization 기준 gradient 크기 조정
+    lr_residual: float       = 1e-2
+
+    # Rollout
+    # horizon 3: 10→3으로 단축 — 모델 오차 누적(compounding error) 억제
+    # iteration 5: 20→5로 축소 — 에피소드당 합성 데이터 51,200개→3,840개로 감소
+    # uncert_thresh 0.15: 0.7→0.15로 강화 — rollout_uncert_avg≈0.2 기준, 통과율 ~1.0→~20%로
+    max_horizon_length: int              = 3
+    uncertainty_threshold: float         = 0.15
+    num_generate_sample_iteration: int   = 5
+    epsilon_min_model: float             = 0.1   # model rollout 탐색 노이즈 std
+
+    def __post_init__(self):
+        assert self.mini_batch_size <= self.buffer_size, (
+            f"mini_batch_size ({self.mini_batch_size}) must be <= buffer_size ({self.buffer_size})"
+        )
+        assert 0.0 < self.real_ratio <= 1.0, (
+            f"real_ratio must be in (0, 1], got {self.real_ratio}"
+        )
+        assert 0.0 < self.tau <= 1.0, (
+            f"tau must be in (0, 1], got {self.tau}"
+        )
