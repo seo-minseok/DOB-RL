@@ -11,10 +11,12 @@ from .nominal import step_nominal_bipedalwalker
 
 def predict_next_obs_dob(obs: np.ndarray, act: np.ndarray,
                           res_net, p_nom: dict,
-                          use_nominal: bool) -> np.ndarray:
+                          use_nominal: bool,
+                          contact_net=None) -> np.ndarray:
     """
     DOB 기반 다음 관측 예측.
     nextObs = obs + dxNom + F_MAT * dxRes
+    contact_net이 주어지면 indices 8, 13을 ContactNet 출력으로 교체.
 
     obs  : (batch, 14) numpy
     act  : (batch, 4)  numpy — continuous action
@@ -26,11 +28,18 @@ def predict_next_obs_dob(obs: np.ndarray, act: np.ndarray,
     else:
         dx_nom = np.zeros_like(obs)
 
+    inp = torch.tensor(np.concatenate([obs, act], axis=-1))
     with torch.no_grad():
-        inp    = torch.tensor(np.concatenate([obs, act], axis=-1))
         dx_res = res_net(inp).cpu().numpy()    # (batch, 7)
 
     next_obs = obs + dx_nom + (dx_res @ F_MAT.T)   # (batch, 14)
+
+    if contact_net is not None:
+        with torch.no_grad():
+            contact_pred = contact_net(inp).cpu().numpy()   # (batch, 2)
+        next_obs[:, 8]  = contact_pred[:, 0]   # left_contact
+        next_obs[:, 13] = contact_pred[:, 1]   # right_contact
+
     return next_obs
 
 

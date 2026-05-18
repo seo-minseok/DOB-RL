@@ -12,9 +12,9 @@ import torch.optim as optim
 from copy import deepcopy
 
 from .config import DOBMBRLConfig
-from .model_learning import train_residual_dx_model_dob, train_uncertainty_rbf, evaluate_rbf_calibration
+from .model_learning import train_residual_dx_model_dob, train_uncertainty_rbf, evaluate_rbf_calibration, train_contact_net
 from .rollout import generate_samples_dob, sample_mixed_minibatch
-from ..models import ActorNetwork, QNetwork, ResidualDxNet, NormalizedRBFModel
+from ..models import ActorNetwork, QNetwork, ResidualDxNet, NormalizedRBFModel, ContactNet
 from ..utils.buffer import ReplayBufferDOB
 from ..dynamics import (
     default_bipedalwalker_params, step_nominal_bipedalwalker,
@@ -91,6 +91,9 @@ def train_DOB_core(run_idx: int,
     uncert_model = NormalizedRBFModel(cfg.num_rbf_centers, cfg.rbf_width, cfg.rbf_initial_value)
     rbf_opt      = optim.SGD(uncert_model.parameters(), lr=cfg.lr_rbf, momentum=0.9)
 
+    contact_net     = ContactNet(num_observations, num_act_features, hidden=64)
+    contact_net_opt = optim.Adam(contact_net.parameters(), lr=cfg.lr_residual)
+
     # --- Buffers ---
     real_buffer  = ReplayBufferDOB(cfg.buffer_size, num_observations, num_act_features)
     model_buffer = ReplayBufferDOB(cfg.buffer_size, num_observations, num_act_features)
@@ -123,6 +126,8 @@ def train_DOB_core(run_idx: int,
         target_critic2.load_state_dict(ckpt['critic2'])
         res_net.load_state_dict(ckpt['res_net'])
         uncert_model.load_state_dict(ckpt['uncert_model'])
+        if 'contact_net' in ckpt:
+            contact_net.load_state_dict(ckpt['contact_net'])
         start_episode    = ckpt['episode'] + 1
         total_step_ct    = ckpt['total_steps']
         total_grad_steps = ckpt.get('total_grad_steps', 0)
@@ -133,6 +138,7 @@ def train_DOB_core(run_idx: int,
     for episode_ct in range(start_episode, num_episodes + 1):
 
         ep_res_net_loss        = float('nan')
+        ep_contact_net_loss    = float('nan')
         ep_rbf_loss            = float('nan')
         ep_buffer_uncert_avg   = float('nan')
         ep_sampled_uncert_avg  = float('nan')
@@ -153,6 +159,10 @@ def train_DOB_core(run_idx: int,
                     res_net, res_net_opt, real_buffer,
                     cfg.mini_batch_size, cfg.num_epochs
                 )
+                ep_contact_net_loss = train_contact_net(
+                    contact_net, contact_net_opt, real_buffer,
+                    cfg.mini_batch_size, cfg.num_epochs
+                )
                 ep_rbf_loss = train_uncertainty_rbf(
                     uncert_model, rbf_opt, real_buffer, res_net,
                     cfg.mini_batch_size, 5
@@ -168,7 +178,7 @@ def train_DOB_core(run_idx: int,
                  ep_rollout_avg_horizon) = generate_samples_dob(
                     real_buffer, model_buffer, res_net, uncert_model,
                     actor, cfg.epsilon_min_model, sample_gen_options,
-                    p_nom, use_nominal
+                    p_nom, use_nominal, contact_net
                 )
 
         # [Phase 2] Episode Reset
@@ -183,6 +193,7 @@ def train_DOB_core(run_idx: int,
         ep_td_losses        = []
         ep_nom_err_per_dim  = []   # list of (OBS_DIM,) abs error arrays
         ep_res_err_per_dim  = []   # list of (OBS_DIM,) abs error arrays
+        ep_contact_errs     = []   # list of (2,) abs error: [left_contact, right_contact]
 
         # [Phase 3] Environment Interaction
         for step_ct in range(1, cfg.max_steps_per_ep + 1):
@@ -235,6 +246,10 @@ def train_DOB_core(run_idx: int,
             ep_uncertainty_mags.append(float(np.linalg.norm(uncertainty)))
             ep_nom_err_per_dim.append(np.abs(e).astype(np.float32))
             ep_res_err_per_dim.append(np.abs(e - F_MAT @ dx_res).astype(np.float32))
+
+            with torch.no_grad():
+                contact_pred = contact_net(inp_res).cpu().numpy().flatten()   # (2,)
+            ep_contact_errs.append(np.abs(contact_pred - next_obs[[8, 13]]).astype(np.float32))
 
             real_buffer.store(
                 obs         = obs,
@@ -317,8 +332,9 @@ def train_DOB_core(run_idx: int,
                 break
 
         _nan_dim = [float('nan')] * OBS_DIM
-        nom_err_per_dim = np.mean(ep_nom_err_per_dim, axis=0).tolist() if ep_nom_err_per_dim else _nan_dim
-        res_err_per_dim = np.mean(ep_res_err_per_dim, axis=0).tolist() if ep_res_err_per_dim else _nan_dim
+        nom_err_per_dim    = np.mean(ep_nom_err_per_dim, axis=0).tolist() if ep_nom_err_per_dim else _nan_dim
+        res_err_per_dim    = np.mean(ep_res_err_per_dim, axis=0).tolist() if ep_res_err_per_dim else _nan_dim
+        contact_err_avg    = np.mean(ep_contact_errs,    axis=0).tolist() if ep_contact_errs    else [float('nan'), float('nan')]
 
         ep_metrics = {
             'nominal_error_avg':    float(np.mean(ep_nominal_errors))   if ep_nominal_errors   else float('nan'),
@@ -326,6 +342,7 @@ def train_DOB_core(run_idx: int,
             'dhat_norm_avg':        float(np.mean(ep_dhat_norms))       if ep_dhat_norms       else float('nan'),
             'uncertainty_avg':      float(np.mean(ep_uncertainty_mags)) if ep_uncertainty_mags else float('nan'),
             'res_net_loss':         ep_res_net_loss,
+            'contact_net_loss':     ep_contact_net_loss,
             'rbf_loss':             ep_rbf_loss,
             'td_loss_avg':          float(np.mean(ep_td_losses)) if ep_td_losses else float('nan'),
             'episode_length':       step_ct,
@@ -337,6 +354,8 @@ def train_DOB_core(run_idx: int,
             'rollout_avg_horizon':  ep_rollout_avg_horizon,
             'rbf_calib_ratio':      ep_rbf_calib_ratio,
             'rbf_calib_corr':       ep_rbf_calib_corr,
+            'contact_err_left':     contact_err_avg[0],
+            'contact_err_right':    contact_err_avg[1],
         }
 
         episode_cumulative_reward_vector.append(episode_reward)
@@ -353,26 +372,31 @@ def train_DOB_core(run_idx: int,
                     writer.writerow([
                         'seed', 'episode', 'total_steps', 'reward',
                         'nominal_error_avg', 'residual_error_avg', 'dhat_norm_avg',
-                        'uncertainty_avg', 'res_net_loss', 'rbf_loss', 'td_loss_avg',
+                        'uncertainty_avg', 'res_net_loss', 'contact_net_loss',
+                        'rbf_loss', 'td_loss_avg',
                         'episode_length', 'expl_noise', 'buffer_uncert_avg',
                         'sampled_uncert_avg', 'rollout_uncert_avg',
                         'rollout_pass_rate', 'rollout_avg_horizon',
                         'rbf_calib_ratio', 'rbf_calib_corr',
                         *[f'nom_err_{n}' for n in OBS_DIM_NAMES],
                         *[f'res_err_{n}' for n in OBS_DIM_NAMES],
+                        'contact_err_left', 'contact_err_right',
                     ])
                 writer.writerow([
                     run_idx, episode_ct, total_step_ct, episode_reward,
                     ep_metrics['nominal_error_avg'], ep_metrics['residual_error_avg'],
                     ep_metrics['dhat_norm_avg'], ep_metrics['uncertainty_avg'],
-                    ep_metrics['res_net_loss'], ep_metrics['rbf_loss'],
-                    ep_metrics['td_loss_avg'], ep_metrics['episode_length'],
+                    ep_metrics['res_net_loss'], ep_metrics['contact_net_loss'],
+                    ep_metrics['rbf_loss'], ep_metrics['td_loss_avg'],
+                    ep_metrics['episode_length'],
                     ep_metrics['expl_noise'], ep_metrics['buffer_uncert_avg'],
                     ep_metrics['sampled_uncert_avg'], ep_metrics['rollout_uncert_avg'],
                     ep_metrics['rollout_pass_rate'], ep_metrics['rollout_avg_horizon'],
                     ep_metrics['rbf_calib_ratio'], ep_metrics['rbf_calib_corr'],
                     *nom_err_per_dim,
                     *res_err_per_dim,
+                    ep_metrics['contact_err_left'],
+                    ep_metrics['contact_err_right'],
                 ])
 
         if result_queue is not None:
@@ -396,6 +420,7 @@ def train_DOB_core(run_idx: int,
                     'critic2'         : critic2.state_dict(),
                     'res_net'         : res_net.state_dict(),
                     'uncert_model'    : uncert_model.state_dict(),
+                    'contact_net'     : contact_net.state_dict(),
                     'total_steps'     : total_step_ct,
                     'total_grad_steps': total_grad_steps,
                     'episode'         : episode_ct,

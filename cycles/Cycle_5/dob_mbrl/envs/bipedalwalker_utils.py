@@ -30,6 +30,13 @@ _SCALE         = 30.0
 _FPS           = 50
 _MOTORS_TORQUE = 80
 
+# 전진 속도 인센티브 계수 (제자리 서 있기 수렴 방지)
+# obs[2] = 0.12 * vel_x (정규화된 수평 속도)
+# - 서 있을 때 (obs[2]≈0): forward_incentive = -_FWD_BASELINE < 0  → 매 step 소폭 음수
+# - 전진 시    (obs[2]=0.3): forward_incentive = 0.25              → 명확히 양수
+_FWD_VEL_COEFF = np.float32(1.0)
+_FWD_BASELINE  = np.float32(0.1)
+
 
 def reward_is_done_function(obs: np.ndarray,
                              action: np.ndarray,
@@ -46,6 +53,11 @@ def reward_is_done_function(obs: np.ndarray,
     pos_x 추정:
       obs[2] = 0.3 * vel_x * (VIEWPORT_W/SCALE) / FPS = 0.12 * vel_x
       Δpos_x ≈ vel_x / FPS = obs[2] / 6.0
+
+    추가 항 (제자리 수렴 방지):
+      forward_incentive = _FWD_VEL_COEFF * obs[2] - _FWD_BASELINE
+      - obs[2] 비례항: 전진 속도를 직접 보상 (후진 패널티 포함)
+      - baseline 패널티: vel_x=0 시 매 step -_FWD_BASELINE → 서 있기가 항상 음수
     """
     import torch
     def _to_np(x):
@@ -73,7 +85,12 @@ def reward_is_done_function(obs: np.ndarray,
     motor_cost = (np.float32(0.00035) * np.float32(_MOTORS_TORQUE)
                   * np.sum(np.clip(np.abs(action), 0.0, 1.0), axis=-1))
 
-    reward  = d_pos_shaping + d_angle_shaping - motor_cost
+    # 전진 속도 인센티브: 서 있기 수렴 방지
+    # - obs[2] 항: 전진 시 양수, 후진 시 음수
+    # - baseline: vel_x=0 이어도 매 step 소폭 음수로 만들어 제자리 균형점 파괴
+    forward_incentive = _FWD_VEL_COEFF * obs[:, 2] - _FWD_BASELINE
+
+    reward  = d_pos_shaping + d_angle_shaping - motor_cost + forward_incentive
     is_done = np.abs(next_obs[:, 0]) > np.float32(1.4)
     reward  = np.where(is_done, np.float32(-100.0), reward)
     return reward.astype(np.float32), is_done

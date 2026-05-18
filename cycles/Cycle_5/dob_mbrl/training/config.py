@@ -47,9 +47,12 @@ class DOBMBRLConfig:
     lr_residual: float       = 1e-2
 
     # Rollout
-    max_horizon_length: int              = 10
-    uncertainty_threshold: float         = 0.7
-    num_generate_sample_iteration: int   = 20
+    # horizon 3: 10→3으로 단축 — 모델 오차 누적(compounding error) 억제
+    # iteration 5: 20→5로 축소 — 에피소드당 합성 데이터 51,200개→3,840개로 감소
+    # uncert_thresh 0.15: 0.7→0.15로 강화 — rollout_uncert_avg≈0.2 기준, 통과율 ~1.0→~20%로
+    max_horizon_length: int              = 3
+    uncertainty_threshold: float         = 0.15
+    num_generate_sample_iteration: int   = 5
     epsilon_min_model: float             = 0.1   # model rollout 탐색 노이즈 std
 
     def __post_init__(self):

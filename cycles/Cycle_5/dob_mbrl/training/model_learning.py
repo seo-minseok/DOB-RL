@@ -109,6 +109,43 @@ def train_uncertainty_rbf(uncert_model, optimizer, real_buffer, res_net,
     return loss_sum / max(1, ct)
 
 
+def train_contact_net(contact_net, optimizer, real_buffer,
+                      mini_batch_size: int, num_epochs: int) -> float:
+    """
+    ContactNet 학습 (BCE loss).
+    Target: real_buffer.next_obs의 left_contact(8), right_contact(13).
+    """
+    contact_net.train()
+    valid_len = real_buffer.length
+    if valid_len == 0:
+        return float('nan')
+
+    loss_sum = 0.0
+    ct       = 0
+
+    for _ in range(num_epochs):
+        num_iterations = valid_len // mini_batch_size
+        for _ in range(num_iterations):
+            idx      = np.random.randint(0, valid_len, size=mini_batch_size)
+            obs_t    = torch.tensor(real_buffer.obs[idx])
+            act_t    = torch.tensor(real_buffer.act[idx])
+            nxt_t    = torch.tensor(real_buffer.next_obs[idx])
+
+            target   = nxt_t[:, [8, 13]]                    # (batch, 2)
+            inp      = torch.cat([obs_t, act_t], dim=-1)
+            pred     = contact_net(inp)                      # (batch, 2), sigmoid
+            loss     = nn.functional.binary_cross_entropy(pred, target)
+
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+            loss_sum += loss.item()
+            ct       += 1
+
+    return loss_sum / max(1, ct)
+
+
 def evaluate_rbf_calibration(uncert_model, real_buffer,
                               sample_size: int = 4096):
     """

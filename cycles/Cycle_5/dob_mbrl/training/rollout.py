@@ -13,7 +13,8 @@ from ..envs.bipedalwalker_utils import reward_is_done_function
 def generate_samples_dob(real_buffer, model_buffer,
                           res_net, uncert_model, actor,
                           rollout_noise: float, options: dict,
-                          p_nom: dict, use_nominal: bool):
+                          p_nom: dict, use_nominal: bool,
+                          contact_net=None):
     """
     Model rollout with per-step uncertainty gating.
     h==0 (첫 번째 step)에서는 항상 신뢰 가능으로 처리.
@@ -79,7 +80,7 @@ def generate_samples_dob(real_buffer, model_buffer,
 
             rel_obs  = valid_obs_np[is_reliable]
             rel_act  = valid_act[is_reliable]
-            rel_next = predict_next_obs_dob(rel_obs, rel_act, res_net, p_nom, use_nominal)
+            rel_next = predict_next_obs_dob(rel_obs, rel_act, res_net, p_nom, use_nominal, contact_net)
             rel_rew, rel_done = reward_is_done_function(rel_obs, rel_act, rel_next)
 
             model_buffer.store_batch(rel_obs, rel_act, rel_next, rel_rew, rel_done)
