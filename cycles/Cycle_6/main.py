@@ -11,6 +11,8 @@ import dataclasses
 import json
 import os
 
+import torch
+
 from dob_mbrl.training import train_DOB_core, DOBMBRLConfig
 
 
@@ -26,11 +28,18 @@ def parse_args():
                         help='병렬 실험용 real_ratio 덮어쓰기 (미입력 시 config.py 값 사용)')
     parser.add_argument('--uncertainty-threshold', type=float, default=None,
                         help='실험용 uncertainty_threshold 덮어쓰기 (미입력 시 config.py 값 사용)')
+    parser.add_argument('--num-threads', type=int, default=None,
+                        help='PyTorch intra-op 스레드 수 (병렬 실행 시 CPU 분배용, 예: --num-threads 8)')
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
+    if args.num_threads is not None:
+        torch.set_num_threads(args.num_threads)
+        os.environ['OMP_NUM_THREADS'] = str(args.num_threads)
+        os.environ['MKL_NUM_THREADS'] = str(args.num_threads)
+        print(f'[main] num_threads={args.num_threads}')
     cfg  = DOBMBRLConfig()
 
     if args.real_ratio is not None:

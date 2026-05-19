@@ -220,7 +220,7 @@ def train_MBRL_core(run_idx: int,
     for p in target_critic2.parameters(): p.requires_grad_(False)
 
     # --- Ensemble Transition Models (train_MBRL_core.py: 3 models, SGD/momentum) ---
-    num_tm = 3
+    num_tm = 1
     transition_models = [
         TransitionNetwork(OBS_DIM, ACT_DIM, hidden=256)
         for _ in range(num_tm)

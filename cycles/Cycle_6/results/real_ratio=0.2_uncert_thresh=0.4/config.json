@@ -23,7 +23,7 @@
   "lr_rbf": 0.05,
   "lr_residual": 0.01,
   "max_horizon_length": 3,
-  "uncertainty_threshold": 0.15,
+  "uncertainty_threshold": 0.4,
   "num_generate_sample_iteration": 5,
   "epsilon_min_model": 0.1
 }

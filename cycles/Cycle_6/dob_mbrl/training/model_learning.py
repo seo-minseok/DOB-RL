@@ -29,9 +29,10 @@ def train_residual_dx_model_dob(res_net, optimizer,
     sampled_uncert_sum = 0.0
 
     for _ in range(num_epochs):
+        perm           = np.random.permutation(valid_len)
         num_iterations = valid_len // mini_batch_size
-        for _ in range(num_iterations):
-            idx    = np.random.randint(0, valid_len, size=mini_batch_size)
+        for i in range(num_iterations):
+            idx    = perm[i * mini_batch_size:(i + 1) * mini_batch_size]
             obs_t  = torch.tensor(real_buffer.obs[idx])
             act_t  = torch.tensor(real_buffer.act[idx])
             dhat_t = torch.tensor(real_buffer.dhat[idx])   # (batch, 7)
@@ -76,8 +77,9 @@ def train_uncertainty_rbf(uncert_model, optimizer, real_buffer, res_net,
         num_iter = valid_len // batch_size
         if num_iter == 0:
             break
-        for _ in range(num_iter):
-            idx     = np.random.randint(0, valid_len, size=batch_size)
+        perm = np.random.permutation(valid_len)
+        for i in range(num_iter):
+            idx     = perm[i * batch_size:(i + 1) * batch_size]
             obs_t   = torch.tensor(obs_all[idx])
             act_t   = torch.tensor(act_all[idx])
             nxt_t   = torch.tensor(next_obs_all[idx])
@@ -121,9 +123,10 @@ def train_contact_net(contact_net, optimizer, real_buffer,
     ct       = 0
 
     for _ in range(num_epochs):
+        perm           = np.random.permutation(valid_len)
         num_iterations = valid_len // mini_batch_size
-        for _ in range(num_iterations):
-            idx      = np.random.randint(0, valid_len, size=mini_batch_size)
+        for i in range(num_iterations):
+            idx      = perm[i * mini_batch_size:(i + 1) * mini_batch_size]
             obs_t    = torch.tensor(real_buffer.obs[idx])
             act_t    = torch.tensor(real_buffer.act[idx])
             nxt_t    = torch.tensor(real_buffer.next_obs[idx])
