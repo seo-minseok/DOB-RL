@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c ' *)",
+      "Bash(python scripts/compare_reward.py --random-agent --test-seed 2558)",
+      "Bash(python scripts/compare_reward.py --ckpt-seed 1 --test-seed 42)",
+      "Bash(python -c \"import imageio; import imageio.plugins.ffmpeg; print\\('imageio ok'\\); print\\(imageio.__version__\\)\")",
+      "Bash(python -c \"import imageio.v2 as iio; print\\(iio.get_writer.__module__\\)\")",
+      "Bash(python test_policy.py --seed 3 --checkpoint-dir \"./checkpoints/real_ratio=0.2_uncert_thresh=0.4\" --output-dir \"./videos\" --num-episodes 3 --fps 30)",
+      "Bash(python test_policy.py --seed 3 --checkpoint-dir \"./checkpoints/real_ratio=1.0\" --output-dir \"./videos/real_ratio=1.0\" --num-episodes 3 --fps 30)"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\seominseok"
+    ]
+  }
+}
