@@ -22,11 +22,28 @@ OBS_MAX = np.array(
 ACT_MIN = np.full(ACT_DIM, -1.0, dtype=np.float32)
 ACT_MAX = np.full(ACT_DIM,  1.0, dtype=np.float32)
 
-# DOB: 전체 state 추적 (DOB_DIM = OBS_DIM)
+# DOB: 전체 state 추적 (DOB_DIM = OBS_DIM) — 기본값 (correct_position=True)
 # FPINV @ e → e (identity),  F_MAT @ dx_res → dx_res (identity)
 DOB_DIM = OBS_DIM
 FPINV = np.eye(DOB_DIM, OBS_DIM, dtype=np.float32)   # (11, 11)
 F_MAT = np.eye(OBS_DIM, DOB_DIM, dtype=np.float32)   # (11, 11)
+
+
+def get_dob_matrices(dob_dim: int):
+    """
+    dob_dim=6  → correct_position=False: velocity-only (obs[5:11]), Cycle_1 호환
+    dob_dim=11 → correct_position=True:  full state, Cycle_1-dob-mbrl 호환
+    Returns (FPINV, F_MAT).
+    """
+    if dob_dim == 6:
+        fpinv = np.zeros((6, OBS_DIM), dtype=np.float32)
+        fpinv[:, 5:] = np.eye(6, dtype=np.float32)    # (6, 11): velocity 행만 추출
+        f_mat = np.zeros((OBS_DIM, 6), dtype=np.float32)
+        f_mat[5:, :] = np.eye(6, dtype=np.float32)    # (11, 6): velocity 행에만 주입
+    else:
+        fpinv = np.eye(dob_dim, OBS_DIM, dtype=np.float32)   # (11, 11) identity
+        f_mat = np.eye(OBS_DIM, dob_dim, dtype=np.float32)   # (11, 11) identity
+    return fpinv, f_mat
 
 # ResidualDxNet / NormalizedRBFModel 입력 범위: [obs(11D), act(3D)] = 14D
 IN_MIN   = np.concatenate([OBS_MIN, ACT_MIN])

@@ -50,23 +50,36 @@ class EnsembleLinear(nn.Module):
 
 
 class InputNormalizer:
-    """Running mean/std normalizer (CPU numpy)."""
+    """Running mean/std normalizer — deprecated wrapper kept for API compat.
+    EnsembleModel now stores mean/std as registered buffers (norm_mean, norm_std).
+    """
 
-    def __init__(self):
-        self.mean: np.ndarray = None
-        self.std:  np.ndarray = None
+    def __init__(self, model: 'EnsembleModel'):
+        self._model = model
+
+    @property
+    def mean(self):
+        v = self._model.norm_mean
+        return None if v is None else v.cpu().numpy()
+
+    @property
+    def std(self):
+        v = self._model.norm_std
+        return None if v is None else v.cpu().numpy()
 
     def fit(self, x: np.ndarray):
-        self.mean = x.mean(axis=0, keepdims=True).astype(np.float32)
-        self.std  = x.std(axis=0, keepdims=True).astype(np.float32)
-        self.std  = np.where(self.std < 1e-8, np.ones_like(self.std), self.std)
+        mean = torch.tensor(x.mean(axis=0, keepdims=True).astype(np.float32))
+        std  = x.std(axis=0, keepdims=True).astype(np.float32)
+        std  = np.where(std < 1e-8, np.ones_like(std), std)
+        std  = torch.tensor(std)
+        device = self._model.norm_mean.device if self._model.norm_mean is not None else torch.device('cpu')
+        self._model.norm_mean = mean.to(device)
+        self._model.norm_std  = std.to(device)
 
     def transform(self, x: torch.Tensor, device: torch.device) -> torch.Tensor:
-        if self.mean is None:
+        if self._model.norm_mean is None:
             return x
-        mean = torch.tensor(self.mean, device=device)
-        std  = torch.tensor(self.std,  device=device)
-        return (x - mean) / std
+        return (x - self._model.norm_mean.to(device)) / self._model.norm_std.to(device)
 
 
 class EnsembleModel(nn.Module):
@@ -97,8 +110,25 @@ class EnsembleModel(nn.Module):
         self.max_logvar = nn.Parameter( 0.5 * torch.ones(1, out_dim))
         self.min_logvar = nn.Parameter(-10.  * torch.ones(1, out_dim))
 
-        self.normalizer  = InputNormalizer()
-        self.elite_inds: list = list(range(num_elites))   # updated after training
+        # Normalizer stats — registered as buffers so they are saved in state_dict()
+        in_dim = obs_dim + act_dim
+        self.register_buffer('norm_mean', None)   # (1, in_dim), set by fit()
+        self.register_buffer('norm_std',  None)   # (1, in_dim), set by fit()
+
+        # Elite indices — registered as buffer (int64 tensor) so they are saved
+        self.register_buffer('_elite_inds_buf',
+                             torch.arange(num_elites, dtype=torch.long))
+
+        self.normalizer = InputNormalizer(self)   # thin wrapper for API compat
+
+    @property
+    def elite_inds(self) -> list:
+        return self._elite_inds_buf.tolist()
+
+    @elite_inds.setter
+    def elite_inds(self, inds):
+        t = torch.tensor(inds, dtype=torch.long)
+        self._elite_inds_buf = t.to(self._elite_inds_buf.device)
 
     # ------------------------------------------------------------------ #
     def _forward_raw(self, x: torch.Tensor) -> torch.Tensor:

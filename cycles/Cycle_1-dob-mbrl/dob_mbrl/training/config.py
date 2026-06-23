@@ -17,7 +17,7 @@ class DOBMBRLConfig:
     discount_factor: float   = 0.99
     tau: float               = 0.005      # soft-update coefficient
     update_interval: int     = 1          # critic 업데이트 주기 (env step 단위)
-    num_gradient_steps: int  = 10         # gradient steps per env step (20→10: Q-divergence 방지)
+    num_gradient_steps: int  = 5          # gradient steps per env step
 
     # SAC Actor
     lr_actor: float          = 3e-4
@@ -31,7 +31,7 @@ class DOBMBRLConfig:
     # Buffer
     buffer_size: int         = int(1e6)
     mini_batch_size: int     = 256
-    num_epochs: int          = 5          # residual model training epochs
+    num_epochs: int          = 5         # residual model training epochs
 
     # Model mixing
     real_ratio: float        = 0.05       # sample_mixed_minibatch real 비율 (원본 MBPO)
@@ -47,7 +47,7 @@ class DOBMBRLConfig:
     lr_residual: float       = 1e-3
 
     # Rollout
-    uncertainty_threshold: float         = 0.5
+    uncertainty_threshold: float         = 1.5
     num_generate_sample_iteration: int   = 1
     epoch_length: int                    = 1000       # 1 epoch = 1000 env steps
     rollout_interval: int                = 250        # model training + rollout 주기 (env step 단위)
@@ -62,6 +62,7 @@ class DOBMBRLConfig:
     # Ablation
     use_uncertainty_sampling: bool       = False
     use_rbf: bool                        = True
+    correct_position: bool               = True   # False → rollout에서 position residual 보정 제거
 
     def __post_init__(self):
         assert self.total_steps > 0, f"total_steps must be positive, got {self.total_steps}"

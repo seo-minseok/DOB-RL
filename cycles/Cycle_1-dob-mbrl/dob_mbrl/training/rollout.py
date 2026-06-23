@@ -100,7 +100,8 @@ def generate_samples_dob(real_buffer, model_buffer,
             pass_obs_np    = valid_obs_np[pass_mask]
             pass_act       = valid_act[pass_mask]
 
-            next_obs = predict_next_obs_dob(pass_obs_np, pass_act, res_net, p_nom, use_nominal)
+            next_obs = predict_next_obs_dob(pass_obs_np, pass_act, res_net, p_nom, use_nominal,
+                                            correct_position=options.get('correct_position', True))
             rew, done = reward_is_done_function(pass_obs_np, pass_act, next_obs)
 
             model_buffer.store_batch(pass_obs_np, pass_act, next_obs, rew, done)

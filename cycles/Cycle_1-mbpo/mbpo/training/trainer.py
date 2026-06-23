@@ -173,7 +173,7 @@ def train_MBPO_core(run_idx: int,
             target_critic1.load_state_dict(ck['target_critic1'])
             critic2.load_state_dict(ck['critic2'])
             target_critic2.load_state_dict(ck['target_critic2'])
-            ensemble_model.load_state_dict(ck['ensemble_model'])
+            ensemble_model.load_state_dict(ck['ensemble_model'], strict=False)
             actor_opt.load_state_dict(ck['actor_opt'])
             critic1_opt.load_state_dict(ck['critic1_opt'])
             critic2_opt.load_state_dict(ck['critic2_opt'])

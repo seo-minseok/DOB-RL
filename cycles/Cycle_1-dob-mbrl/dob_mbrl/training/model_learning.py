@@ -7,8 +7,6 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from ..dynamics.constants import FPINV
-
 
 def train_residual_dx_model_dob(res_net, optimizer,
                                  real_buffer, mini_batch_size: int,
@@ -79,7 +77,7 @@ def train_residual_dx_model_dob(res_net, optimizer,
 
 
 def train_uncertainty_rbf(uncert_model, optimizer, real_buffer,
-                           res_net, batch_size: int, epochs: int):
+                           res_net, batch_size: int, epochs: int, fpinv):
     """
     MATLAB: trainUncertaintyRBF
     fresh_uncertainty_all = |Fpinv*e - dxRes| 를 한 번 계산 후 반복 학습.
@@ -103,7 +101,7 @@ def train_uncertainty_rbf(uncert_model, optimizer, real_buffer,
 
     dx_real_all  = next_obs_all - obs_all              # (N, OBS_DIM)
     e_all        = dx_real_all - dx_nom_all            # (N, OBS_DIM)
-    fpinv_e      = e_all @ FPINV.T                     # (N, DOB_DIM)
+    fpinv_e      = e_all @ fpinv.T                     # (N, dob_dim)
     fresh_uncert = fpinv_e - dx_res_all                # (N, DOB_DIM)
     fresh_uncert_avg = float(np.linalg.norm(fresh_uncert, axis=1).mean())
 

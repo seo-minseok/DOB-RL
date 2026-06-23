@@ -4,16 +4,17 @@ from .constants import (
     FPINV, F_MAT,
     IN_MIN, IN_MAX, PHYS_MIN, PHYS_MAX,
     HEALTHY_Z_MIN, HEALTHY_ANG_MAX, HEALTHY_STATE_MIN, HEALTHY_STATE_MAX,
+    get_dob_matrices,
 )
 from .nominal import default_hopper_params, step_nominal_hopper
-from .dob import predict_next_obs_dob, compute_dob_update
+from .dob import predict_next_obs_dob
 
 __all__ = [
     'OBS_DIM', 'ACT_DIM', 'DOB_DIM',
     'OBS_MIN', 'OBS_MAX', 'ACT_MIN', 'ACT_MAX',
-    'FPINV', 'F_MAT',
+    'FPINV', 'F_MAT', 'get_dob_matrices',
     'IN_MIN', 'IN_MAX', 'PHYS_MIN', 'PHYS_MAX',
     'HEALTHY_Z_MIN', 'HEALTHY_ANG_MAX', 'HEALTHY_STATE_MIN', 'HEALTHY_STATE_MAX',
     'default_hopper_params', 'step_nominal_hopper',
-    'predict_next_obs_dob', 'compute_dob_update',
+    'predict_next_obs_dob',
 ]

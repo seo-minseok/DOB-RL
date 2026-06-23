@@ -38,6 +38,10 @@ def parse_args():
                         help='PyTorch intra-op 스레드 수 (병렬 실행 시 CPU 분배용, 예: --num-threads 8)')
     parser.add_argument('--gpu', type=int, default=0,
                         help='사용할 GPU 인덱스 (예: --gpu 0, --gpu 1). -1이면 CPU 사용')
+    parser.add_argument('--no-position-correction', action='store_true',
+                        help='Ablation: rollout에서 position residual 보정 제거')
+    parser.add_argument('--rollout-batch-size', type=int, default=None,
+                        help='실험용 rollout_batch_size 덮어쓰기 (미입력 시 config.py 값 사용)')
     return parser.parse_args()
 
 
@@ -57,12 +61,21 @@ def main():
     cfg = DOBMBRLConfig()
     if args.real_ratio is not None:
         cfg.real_ratio = args.real_ratio
+    if args.uncertainty_threshold is not None:
+        cfg.uncertainty_threshold = args.uncertainty_threshold
+    if args.no_position_correction:
+        cfg.correct_position = False
+    if args.rollout_batch_size is not None:
+        cfg.rollout_batch_size = args.rollout_batch_size
     os.makedirs(args.checkpoint_dir, exist_ok=True)
 
-    if args.real_ratio is not None:
-        run_name = f'real_ratio={cfg.real_ratio}'
-    else:
-        run_name = f'real_ratio={cfg.real_ratio}'
+    run_name = f'real_ratio={cfg.real_ratio}_num_gstep={cfg.num_gradient_steps}'
+    if args.uncertainty_threshold is not None:
+        run_name += f'_uncert={cfg.uncertainty_threshold}'
+    if args.rollout_batch_size is not None:
+        run_name += f'_rbatch={cfg.rollout_batch_size}'
+    if not cfg.correct_position:
+        run_name += '_no_pos_corr'
 
     _here = os.path.dirname(os.path.abspath(__file__))
     results_dir = os.path.join(_here, 'results', run_name)

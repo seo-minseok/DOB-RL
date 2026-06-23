@@ -1,7 +1,8 @@
 """
 trainer.py — train_DOB_core 메인 루프 (Gymnasium Hopper-v5, SAC)
 Twin critics + stochastic actor + auto-tune alpha (entropy temperature)
-DOB_DIM=11 (전체 state 추적, FPINV = F_MAT = I_11)
+correct_position=False → DOB_DIM=6 (velocity-only, Cycle_1 호환)
+correct_position=True  → DOB_DIM=11 (full state, Cycle_1-dob-mbrl 호환)
 """
 import csv
 import dataclasses
@@ -21,7 +22,7 @@ from ..models import ActorNetwork, QNetwork, ResidualDxNet, NormalizedRBFModel
 from ..utils.buffer import ReplayBufferDOB
 from ..dynamics import (
     default_hopper_params, step_nominal_hopper,
-    FPINV, F_MAT, DOB_DIM,
+    get_dob_matrices,
 )
 from ..envs.hopper_utils import (
     make_hopper_env, reset_env, step_env,
@@ -114,6 +115,9 @@ def train_DOB_core(run_idx: int,
     if device is None:
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
+    dob_dim      = 6 if not cfg.correct_position else 11
+    FPINV, F_MAT = get_dob_matrices(dob_dim)
+
     print(f'[Seed {run_idx}] device={device}')
 
     np.random.seed(run_idx)
@@ -142,26 +146,27 @@ def train_DOB_core(run_idx: int,
     alpha_opt = optim.Adam([log_alpha], lr=cfg.lr_alpha)
     target_entropy = cfg.target_entropy
 
-    res_net     = ResidualDxNet(NUM_OBS, NUM_ACT, hidden=256, out_dim=DOB_DIM).to(device)
+    res_net     = ResidualDxNet(NUM_OBS, NUM_ACT, hidden=256, out_dim=dob_dim).to(device)
     res_net_opt = optim.Adam(res_net.parameters(), lr=cfg.lr_residual)
 
-    uncert_model = NormalizedRBFModel(cfg.num_rbf_centers, cfg.rbf_width, cfg.rbf_initial_value).to(device)
+    uncert_model = NormalizedRBFModel(cfg.num_rbf_centers, cfg.rbf_width, cfg.rbf_initial_value, dob_dim=dob_dim).to(device)
     rbf_opt      = optim.SGD(uncert_model.parameters(), lr=cfg.lr_rbf, momentum=0.9)
 
     # --- Buffers (CPU) ---
-    real_buffer  = ReplayBufferDOB(cfg.buffer_size, NUM_OBS, NUM_ACT, dob_dim=DOB_DIM)
+    real_buffer  = ReplayBufferDOB(cfg.buffer_size, NUM_OBS, NUM_ACT, dob_dim=dob_dim)
     _max_pool    = compute_model_pool_size(
         cfg.rollout_horizon, cfg.rollout_batch_size,
         cfg.epoch_length, cfg.rollout_interval, cfg.model_retain_epochs,
     )
     model_buffer = ReplayBufferDOB(max(int(_max_pool), cfg.rollout_batch_size),
-                                   NUM_OBS, NUM_ACT, dob_dim=DOB_DIM)
+                                   NUM_OBS, NUM_ACT, dob_dim=dob_dim)
 
     sample_gen_options = {
         'uncertainty_threshold'         : cfg.uncertainty_threshold,
         'num_generate_sample_iteration' : cfg.num_generate_sample_iteration,
         'rollout_batch_size'            : cfg.rollout_batch_size,
         'rollout_horizon'               : cfg.rollout_horizon,
+        'correct_position'              : cfg.correct_position,
     }
 
     episode_cumulative_reward_vector = []
@@ -238,7 +243,7 @@ def train_DOB_core(run_idx: int,
         obs            = np.array(reset_env(env), dtype=np.float32)
         obs_t          = torch.tensor(obs, device=device).unsqueeze(0)
         episode_reward = 0.0
-        dhat           = np.zeros(DOB_DIM, dtype=np.float32)
+        dhat           = np.zeros(dob_dim, dtype=np.float32)
         ep_nominal_errors   = []
         ep_residual_errors  = []
         ep_dhat_norms       = []
@@ -284,13 +289,13 @@ def train_DOB_core(run_idx: int,
                     ).unsqueeze(0)
                     dx_res = res_net(inp_res).cpu().numpy().flatten()   # (11,)
             else:
-                dx_res = np.zeros(DOB_DIM, dtype=np.float32)
+                dx_res = np.zeros(dob_dim, dtype=np.float32)
 
             e = dx_real - dx_nom
             if use_dob:
                 dhat = cfg.dob_w * dx_res + (1.0 - cfg.dob_w) * (FPINV @ e)
             else:
-                dhat = np.zeros(DOB_DIM, dtype=np.float32)
+                dhat = np.zeros(dob_dim, dtype=np.float32)
 
             uncertainty = FPINV @ e - dx_res
 
@@ -332,7 +337,7 @@ def train_DOB_core(run_idx: int,
                 if cfg.use_rbf:
                     ep_rbf_loss, ep_fresh_uncert_avg = train_uncertainty_rbf(
                         uncert_model, rbf_opt, real_buffer, res_net,
-                        cfg.mini_batch_size, 5
+                        cfg.mini_batch_size, 5, fpinv=FPINV
                     )
                 model_trained_at_least_once = True
                 (model_buffer,

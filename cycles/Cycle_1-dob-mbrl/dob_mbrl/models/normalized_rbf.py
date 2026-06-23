@@ -5,14 +5,14 @@ Only model.Weights are trainable; Centers are fixed at init.
 """
 import torch
 import torch.nn as nn
-from ..dynamics.constants import PHYS_MIN, PHYS_MAX, DOB_DIM
+from ..dynamics.constants import PHYS_MIN, PHYS_MAX
 
 _IN_DIM = len(PHYS_MIN)   # 14 (obs 11 + act 3)
 
 
 class NormalizedRBFModel(nn.Module):
     def __init__(self, num_centers: int = 1200, width: float = 0.1,
-                 initial_value: float = 5.0):
+                 initial_value: float = 5.0, dob_dim: int = 11):
         super().__init__()
         phys_min_t = torch.tensor(PHYS_MIN)
         phys_max_t = torch.tensor(PHYS_MAX)
@@ -26,7 +26,7 @@ class NormalizedRBFModel(nn.Module):
         self.register_buffer('phys_min', phys_min_t)
         self.register_buffer('phys_max', phys_max_t)
         self.width   = width
-        self.weights = nn.Parameter(torch.ones(DOB_DIM, num_centers) * initial_value)
+        self.weights = nn.Parameter(torch.ones(dob_dim, num_centers) * initial_value)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
