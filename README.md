@@ -1,347 +1,223 @@
-# DOB-MBRL: Disturbance Observer-Based Model-Based Reinforcement Learning
+# DOB-MBRL
 
-CartPole 환경에서 **Nominal Dynamics + Learned Residual Dynamics + Disturbance Observer(DOB)** 를 결합한 강화학습 프레임워크.
+**Disturbance Observer 기반 Model-Based Reinforcement Learning**
 
-원본 MATLAB 구현을 PyTorch + Gymnasium 기반으로 이식하고, 반복 실험을 위한 **Cycle 기반 실험 관리 시스템**을 함께 제공한다.
+단순한 물리 기반 명목(nominal) 모델에 **Disturbance Observer(DOB)** 와 **학습된 residual 모델**을 더해 환경 동역학을 근사하고, 이 모델로 생성한 가상 경험으로 정책을 학습하는 연구 프로젝트.
 
----
+- 실험 환경: **Gymnasium MuJoCo `Hopper-v5`**
+- 정책 학습: **Soft Actor-Critic(SAC)**
+- 비교 대상: **MBPO**
 
-## 알고리즘 개요
-
-DOB-MBRL은 세 가지 구성 요소를 결합한다.
-
-```
-실제 환경 관측
-        │
-        ▼
-┌───────────────────┐     ┌──────────────────────┐
-│  Nominal Dynamics  │ +   │  Residual Dynamics Net │
-│  (물리 방정식 기반) │     │  (잔차 신경망, 32-dim) │
-└───────────────────┘     └──────────────────────┘
-        │                           │
-        └────────────┬──────────────┘
-                     │
-                     ▼
-          ┌──────────────────┐
-          │  DOB (온라인 보정) │  ← 모델 오차를 에피소드마다 실시간 추정
-          └──────────────────┘
-                     │
-                     ▼
-          ┌──────────────────┐
-          │    Q-Network      │  ← DQN 계열, 128-128-2 FC
-          └──────────────────┘
-```
-
-**핵심 아이디어**
-- **Nominal Model**: 가속도를 0으로 단순화한 Euler 적분 모델 (빠른 계산)
-- **ResidualDxNet**: Nominal이 설명하지 못하는 잔차(속도·각속도 변화)를 5-dim 입력(관측 4 + 힘 1)으로 학습
-- **DOB**: `dhat = dob_w * dx_res + (1 - dob_w) * (FPINV @ e)` 로 온라인 보정 (에피소드마다 `zeros(2)` 리셋)
-- **RBF Uncertainty**: Normalized RBF 모델로 rollout 신뢰도를 추정, 불확실한 영역에서 rollout 조기 종료
-- **Model Buffer**: 가상 rollout으로 샘플 효율 향상 (`real_ratio=0.2` → 실제 20% + 가상 80%)
+<p align="center">
+  <img src="docs/images/hopper-env.gif" alt="Gymnasium MuJoCo Hopper-v5 환경" height="260">
+  &nbsp;&nbsp;
+  <img src="docs/images/hopper-joint-layout.png" alt="Hopper의 torso, thigh, leg, foot와 세 관절 구조" height="260">
+</p>
+<p align="center"><sub>왼쪽: Hopper-v5 환경 &nbsp;|&nbsp; 오른쪽: torso–thigh–leg–foot와 세 개의 hinge joint</sub></p>
 
 ---
 
-## 프로젝트 구조
+## 이 프로젝트가 풀려는 문제
 
+- Model-based RL은 환경 모델로 가상 경험을 생성해 샘플 효율을 높이는 방법
+- 하지만 동역학 전체를 신경망 하나로 학습하면 rollout 중 모델 오차가 누적되고, 모델을 어디까지 믿어도 되는지 판단하기 어려움
+- DOB-MBRL은 동역학을 세 부분으로 나눠 이 문제에 접근
+
+| 구성 요소 | 역할 |
+|---|---|
+| **Nominal model** | 위치를 현재 속도로 적분하는 단순 운동학 모델. 빠르고 구조가 명확하지만 중력·접촉·토크는 고려하지 않음 |
+| **DOB + Residual model** | 실제 전이와 nominal 예측의 차이(외란)를 DOB로 추정하고, residual MLP가 이를 `(상태, 행동)`의 함수로 학습 |
+| **RBF uncertainty model** | residual 모델이 아직 설명하지 못한 오차를 추정해, 신뢰할 수 없는 rollout을 조기에 중단 |
+
+핵심 아이디어: **물리적으로 알고 있는 부분은 nominal 모델이, 모르는 부분은 DOB와 residual 모델이 담당**하도록 역할을 분리
+
+## 동역학 모델 상세
+
+### Hopper 관측과 행동
+
+- 관측: 11차원
+- 행동: 세 관절(thigh, leg, foot)의 토크 입력 3차원, 범위 `[-1, 1]`
+
+| 인덱스 | 의미 | 구분 |
+|---:|---|---|
+| 0 | torso 높이 `z` | 위치 |
+| 1 | torso 각도 | 위치 |
+| 2–4 | thigh, leg, foot 관절 각도 | 위치 |
+| 5 | torso 전진 속도 `vx` | 속도 |
+| 6 | torso 수직 속도 `vz` | 속도 |
+| 7–10 | torso 및 세 관절의 각속도 | 속도 |
+
+### 1. Nominal model
+
+```text
+q(t+1) = q(t) + q̇(t) · dt        # 위치 5개 (obs[0:5] += obs[6:11] · dt)
+v(t+1) = v(t)                     # 속도 6개는 그대로
+dt = 0.008 s                      # frame_skip 4 × timestep 0.002
 ```
+
+- 행동, 중력, 접촉력을 전혀 고려하지 않음
+- 실제 전이와의 차이는 모두 DOB와 residual 모델의 학습 대상
+
+### 2. DOB와 residual model
+
+```text
+e     = (s' - s) - Δs_nom                          # nominal이 설명하지 못한 변화
+d̂     = dob_w · Δs_res + (1 - dob_w) · (FPINV @ e)  # DOB 외란 추정 (dob_w = 0.1)
+loss  = MSE(ResidualMLP(s, a), d̂)
+```
+
+- 입력: `[obs(11), action(3)]`
+- 구조: 256-unit hidden layer 4개
+- Rollout의 다음 상태 계산
+
+```text
+s' = s + Δs_nom + F_MAT @ ResidualMLP(s, a)
+```
+
+### 3. RBF uncertainty model
+
+- Normalized RBF 모델(center 3,000개)로 `|FPINV @ e - Δs_res|`, 즉 residual 모델의 남은 오차를 학습
+- Rollout 중 예측 uncertainty의 L2 norm이 임계값(기본 `1.5`)을 넘으면 해당 trajectory를 중단하고, 그 step은 model buffer에 저장하지 않음
+
+### 4. 모델 rollout의 보상과 종료
+
+- Rollout에서는 보상과 종료를 관측만으로 계산 ([`hopper_utils.py`](cycles/Cycle_1-dob-mbrl/dob_mbrl/envs/hopper_utils.py))
+
+```text
+reward = forward_reward + healthy_reward - 0.001 · Σ action²
+done   = z < 0.7  or  |torso angle| > 0.2  or  상태 범위 이탈
+```
+
+## 실험 내용
+
+### 6D 보정에서 11D 보정으로
+
+- 초기 설계(6D): 위치 5개는 nominal 모델의 Euler 적분에 맡기고, residual 모델은 속도 6개만 보정
+- 문제: rollout이 길어질수록 아래와 같은 오차 누적 발생
+
+<p align="center">
+  <img src="docs/images/rollout-error-accumulation.png" alt="6D residual 보정에서 위치 오차가 rollout 동안 누적되는 과정" width="780">
+</p>
+<p align="center"><sub>파란 선: nominal 적분 경로, 빨간 선: residual 보정 경로</sub></p>
+
+- 위치(5D)가 **이전 step의 속도**로 적분되므로, action으로 이미 바뀐 속도가 한 step 늦게 반영됨
+- 이 위치 오차가 rollout 동안 누적되고, 누적된 상태가 다시 residual 모델의 입력으로 들어감
+- 입력 분포가 실제 trajectory에서 벗어나면서 속도(6D) 예측까지 함께 악화
+
+**조치**: residual 모델이 **11차원 전체 상태를 보정**하는 방식(`correct_position=True`)을 기본값으로 변경. 6D 방식은 `--no-position-correction` 옵션으로 비교 실험 가능
+
+<p align="center">
+  <img src="docs/images/dob-mbrl-6d-vs-11d-return.png" alt="DOB-MBRL 6D와 11D residual 보정의 environment return 비교" width="780">
+</p>
+<p align="center">
+  <img src="docs/images/dob-mbrl-6d-vs-11d-horizon.png" alt="DOB-MBRL 6D와 11D residual 보정의 rollout horizon 비교" width="780">
+</p>
+<p align="center"><sub>6D vs 11D 보정, 각 8 seeds의 평균 ± 표준편차 (위: environment return, 아래: uncertainty 검사를 통과한 평균 rollout 길이)</sub></p>
+
+- Rollout horizon: 학습 초반에는 11D가 6D보다 짧았으나 약 80k step 이후 비슷한 수준
+- Environment return: 약 40k step 이후 11D가 6D보다 뚜렷하게 높게 유지
+
+### MBPO와 비교
+
+<p align="center">
+  <img src="docs/images/dob-mbrl-vs-mbpo-return.png" alt="DOB-MBRL(11D)과 MBPO의 environment return 비교" width="780">
+</p>
+<p align="center"><sub>DOB-MBRL(11D 보정) vs MBPO, 각 8 seeds, 125k environment steps</sub></p>
+
+- MBPO는 [`cycles/Cycle_1-mbpo/`](cycles/Cycle_1-mbpo/)에 PyTorch로 재구현 (probabilistic ensemble 7개, elite 5개)
+- 같은 step 예산에서 DOB-MBRL이 학습 초중반(약 25k–60k step)에 더 빠르게 return 상승
+- 후반에는 두 방법이 비슷한 수준에 도달
+
+> **참고**: 위 그래프들은 이전 실험 기록. 해당 실행의 원본 결과 파일(`results/`, `checkpoints/`)은 저장소에 포함되어 있지 않으므로, 재현된 최종 성능이 아닌 연구 경과로 해석 필요
+
+## 저장소 구조
+
+```text
 DOB-RL/
-├── base/                          # 기본 코드 아카이브 (수정 금지)
-│   ├── original/                  # 원본 파일 (절대 수정 금지)
-│   │   ├── train_DOB_core.py
-│   │   └── Multi_Seed_DOB_Exp.py
-│   ├── dob_mbrl/                  # 모듈화된 패키지
-│   ├── main.py
-│   ├── run_multi_seed.py
-│   └── scripts/
-│       └── plot_results.py
-│
-├── cycles/                        # 실험 Cycle 관리
-│   └── Cycle_N/                   # 각 실험 단위
-│       ├── CYCLE_REPORT.md        # 실험 보고서
-│       ├── dob_mbrl/              # base에서 복사된 코드 (수정 가능)
-│       ├── main.py
-│       ├── run_multi_seed.py
-│       ├── scripts/
-│       ├── checkpoints/           # 학습된 모델 저장
-│       ├── figures/               # 시각화 결과
-│       ├── logs/                  # 단일 시드 로그
-│       └── results/               # 멀티 시드 결과
-│
-├── .claude/
-│   ├── instructions/              # 에이전트 작업 지침서
-│   └── skills/                    # 자동화 스킬 스크립트
-│       ├── cycle-manager/         # Cycle 생성 자동화
-│       └── plot-generator/        # Figure 생성 자동화
-│
-├── CLAUDE.md                      # 에이전트 절대 규칙
-├── memory.md                      # 에이전트 지식 메모리
-├── experiments_log.md             # Cycle별 실험 이력 테이블
-├── dob_mbrl_agent_design.md       # 시스템 설계 문서
+├── cycles/                         # 실험 단위(Cycle)별 구현 — 모든 개발은 여기서
+│   ├── Cycle_1-dob-mbrl/           # ★ 현재 DOB-MBRL 구현 (Hopper-v5, SAC)
+│   │   ├── dob_mbrl/
+│   │   │   ├── dynamics/           # nominal 모델, DOB, 상태/행동 상수
+│   │   │   ├── envs/               # Hopper 보상·종료 함수
+│   │   │   ├── models/             # SAC actor/critic, residual MLP, RBF
+│   │   │   ├── training/           # config, 학습 루프, 모델 학습, rollout
+│   │   │   └── utils/              # real/model replay buffer
+│   │   ├── main.py                 # 단일 seed 실행 진입점
+│   │   ├── CYCLE_REPORT.md         # Cycle 실험 보고서
+│   │   └── RBF_*.md                # RBF uncertainty 설계 메모
+│   └── Cycle_1-mbpo/               # 비교용 MBPO 구현
+├── base/                           # CartPole + DQN 초기 이식본과 원본 코드 (수정 금지 아카이브)
+├── docs/
+│   ├── images/                     # README 이미지
+│   └── slides/                     # 랩미팅 발표 자료 (.pptx)
+├── experiments_log.md              # 실험 기록
 └── requirements.txt
 ```
 
----
+- 출발점은 **CartPole + DQN**(`base/`), 이후 Hopper + SAC로 확장
+- 새 실험은 `cycles/Cycle_N-*/` 폴더를 새로 만들어 진행하며, `base/`는 수정하지 않음
 
-## 패키지 구조 (`dob_mbrl/`)
+## 시작하기
 
-```
-dob_mbrl/
-├── dynamics/
-│   ├── constants.py       # 전역 상수 (관측 범위, ACT_ELEMENTS, FPINV, F_MAT)
-│   ├── nominal.py         # Nominal CartPole Dynamics (Euler 적분)
-│   └── dob.py             # DOB 관련 유틸리티
-├── models/
-│   ├── q_network.py       # QNetwork — FC(128)→ReLU→FC(128)→ReLU→FC(2)
-│   ├── residual_dx_net.py # ResidualDxNet — FC(32)→ReLU→FC(32)→ReLU→FC(2)
-│   └── normalized_rbf.py  # NormalizedRBFModel — 불확실성 추정
-├── training/
-│   ├── config.py          # DOBMBRLConfig (dataclass, 하이퍼파라미터 전체)
-│   ├── trainer.py         # train_DOB_core — 메인 학습 루프
-│   ├── model_learning.py  # Residual 및 RBF 모델 학습 함수
-│   └── rollout.py         # 가상 rollout 생성 및 mixed 미니배치 샘플링
-├── envs/
-│   └── cartpole_utils.py  # make_cartpole_env, reset_env, step_env (5-tuple 처리)
-└── utils/
-    └── buffer.py          # ReplayBufferDOB (real_buffer, model_buffer 분리 운영)
-```
+### 설치
 
----
-
-## 설치
+- Python 3.10 이상 권장
 
 ```bash
+python -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
+pip install "gymnasium[mujoco]"
 ```
 
-**요구 사항**
+- CUDA 사용 시 시스템 CUDA 버전에 맞는 PyTorch 빌드를 별도로 설치
 
-| 패키지 | 최소 버전 |
-|---|---|
-| torch | ≥ 2.0.0 |
-| gymnasium | ≥ 0.29.0 |
-| numpy | ≥ 1.24.0 |
-| matplotlib | ≥ 3.7.0 |
-
-CUDA가 설치되어 있으면 `torch+cu*` 버전 사용을 권장한다.
-
----
-
-## 학습 실행
-
-모든 학습 명령은 해당 Cycle 디렉토리 기준으로 실행한다.
-
-### 단일 시드
+### 실행
 
 ```bash
-cd cycles/Cycle_1
-python main.py --checkpoint-dir ./checkpoints --seed 1
+cd cycles/Cycle_1-dob-mbrl
+python main.py --seed 1 --gpu 0 --checkpoint-dir ./checkpoints
 ```
+
+- CPU 실행 시 `--gpu -1` 사용
 
 | 옵션 | 설명 |
 |---|---|
-| `--checkpoint-dir` | 체크포인트 저장 경로 (기본: `./checkpoints`) |
-| `--seed` | 랜덤 시드 번호 (기본: 1) |
-| `--resume` | 기존 체크포인트에서 재개 |
+| `--seed N` | 랜덤 seed (기본값 1) |
+| `--gpu N` | GPU 인덱스, `-1`이면 CPU |
+| `--checkpoint-dir PATH` | checkpoint 저장 위치 |
+| `--resume` | 가장 최근 checkpoint에서 이어서 학습 |
+| `--real-ratio R` | 혼합 배치의 실제 데이터 비율 |
+| `--uncertainty-threshold T` | rollout uncertainty 임계값 |
+| `--rollout-batch-size N` | rollout 시작 상태 수 |
+| `--no-position-correction` | 11D 대신 6D(속도만) residual 보정 사용 |
+| `--num-threads N` | PyTorch CPU thread 수 |
 
-로그: `cycles/Cycle_N/logs/seed_{N}_result.pkl`
+> 기본 `rollout_batch_size=100000`은 원본 MBPO 설정을 따른 값으로 메모리와 계산량이 큼. 로컬에서 처음 실행할 때는 `--rollout-batch-size 10000`처럼 낮춰서 확인 권장
 
-### 멀티 시드 병렬
+### 출력
 
-```bash
-cd cycles/Cycle_1
-python run_multi_seed.py --checkpoint-dir ./checkpoints --num-seeds 16
+```text
+results/real_ratio=..._num_gstep=.../
+├── config.json              # 실행 설정
+├── seed_N_progress.csv      # reward, eval reward, model error, uncertainty, rollout 통과율·horizon
+└── seed_N_result.pkl        # episode별 reward와 metric
+
+checkpoints/real_ratio=..._num_gstep=.../
+├── Resume_SeedN_Latest.pt   # 매 episode 저장, --resume에 사용
+└── Champion_SeedN_BestModel.pt  # 최근 10 episode 평균 reward ≥ 2,000에서 최고 기록 갱신 시 저장
 ```
 
-| 옵션 | 설명 |
-|---|---|
-| `--checkpoint-dir` | 체크포인트 저장 경로 |
-| `--num-seeds` | 병렬 실행 시드 수 (기본: 16) |
+## 기본 하이퍼파라미터
 
-워커 수는 `min(num_seeds, cpu_count())`로 자동 결정된다.
+- 전체 설정은 [`config.py`](cycles/Cycle_1-dob-mbrl/dob_mbrl/training/config.py)에 있으며, 파일을 직접 수정해 변경
 
-결과: `cycles/Cycle_N/results/DOB_MBRL_MultiSeed_Result.pkl`
-
-### Checkpoint 저장 조건
-
-최근 10 에피소드 평균 reward ≥ 480 이고 기존 최고 기록 초과 시 저장.
-
-```
-cycles/Cycle_N/checkpoints/Champion_Seed{seed}_BestModel.pt
-```
-
----
-
-## 하이퍼파라미터 수정
-
-`cycles/Cycle_N/dob_mbrl/training/config.py`를 **직접 편집**한다. CLI override는 없다.
-
-```python
-@dataclass
-class DOBMBRLConfig:
-    num_episodes: int        = 200       # 총 에피소드
-    max_steps_per_ep: int    = 500       # 에피소드 최대 스텝
-    warm_start_samples: int  = 200       # 탐색 시작 전 수집 샘플 수
-
-    lr_critic: float         = 1e-3      # Q-Network Adam lr
-    discount_factor: float   = 0.99
-    tau: float               = 0.005     # Target network soft-update
-
-    epsilon: float           = 1.0       # 초기 탐색률
-    epsilon_min: float       = 0.01
-    epsilon_decay: float     = 0.005
-
-    real_ratio: float        = 0.2       # Mixed 배치에서 실제 데이터 비율
-    dob_w: float             = 0.1       # DOB 가중치
-
-    num_rbf_centers: int     = 600       # RBF 모델 센터 수
-    ...
-```
-
-수정 후 검증:
-
-```bash
-python -c "from dob_mbrl.training.config import DOBMBRLConfig; DOBMBRLConfig()"
-```
-
-### Ablation 실행
-
-`train_residual_dx_model_dob`의 uncertainty-weighted sampling을 uniform sampling으로 교체하는 ablation.
-
-```bash
-cd cycles/Cycle_N
-python run_multi_seed.py --checkpoint-dir ./checkpoints/ablation --num-seeds 16 --ablation
-```
-
-결과: `cycles/Cycle_N/results/DOB_MBRL_MultiSeed_Result_Ablation.pkl`
-
-#### 메소드 호출 순서
-
-```
-run_multi_seed.py
-└── main()
-    ├── parse_args()                          # --ablation 플래그 파싱 → use_uncertainty_sampling=False
-    └── Pool.map(_run_single, args_list)      # num_seeds개 프로세스 병렬 실행
-        └── _run_single(run_idx, ...)
-            └── train_DOB_core()              # trainer.py — 메인 학습 루프 (시드별 독립 실행)
-                │
-                │  [에피소드마다 반복]
-                │
-                ├── [Phase 1] 모델 학습 & 가상 롤아웃 (warm_start 이후, buffer 충분 시)
-                │   ├── train_residual_dx_model_dob()   # model_learning.py
-                │   │     uniform sampling으로 real_buffer에서 미니배치 추출
-                │   │     → ResidualDxNet을 dhat(DOB 추정값)에 맞춰 SGD 학습
-                │   │
-                │   ├── train_uncertainty_rbf()          # model_learning.py
-                │   │     |Fpinv*e - dx_res|를 타겟으로
-                │   │     → NormalizedRBFModel을 SGD 학습
-                │   │
-                │   └── generate_samples_dob()           # rollout.py
-                │         real_buffer에서 초기 상태 샘플링
-                │         → [스텝마다] uncert_model()로 신뢰도 평가
-                │             신뢰 가능한 상태만 predict_next_obs_dob()로 다음 상태 예측
-                │             → model_buffer.store_batch()로 가상 전이 저장
-                │
-                ├── [Phase 2] 에피소드 리셋
-                │   └── reset_env()                      # cartpole_utils.py
-                │         환경 초기화, dhat = zeros(2) 리셋
-                │
-                ├── [Phase 3] 환경 인터랙션 (스텝마다)
-                │   ├── q_network()                      # 현재 관측 → Q값 → epsilon-greedy 행동 선택
-                │   ├── step_env()                       # cartpole_utils.py — 환경 한 스텝 진행
-                │   ├── step_nominal_cartpole()          # nominal.py — 물리 방정식 기반 예측
-                │   ├── res_net()                        # ResidualDxNet — 잔차 예측 (동결 상태)
-                │   │     dhat = dob_w * dx_res + (1-dob_w) * (FPINV @ e)  ← DOB 온라인 업데이트
-                │   └── real_buffer.store()              # buffer.py — 전이 저장
-                │
-                └── [Phase 4] Q-Network 업데이트 (update_interval 스텝마다)
-                    ├── sample_mixed_minibatch()         # rollout.py
-                    │     real_buffer 20% + model_buffer 80% 혼합 미니배치 구성
-                    ├── target_network()                 # Bellman 타겟 Q값 계산 (no_grad)
-                    ├── q_network()                      # 현재 Q값 예측
-                    │     MSE loss → Adam optimizer → gradient clip(1.0)
-                    └── target_network soft-update       # τ=0.005 로 파라미터 이동 평균 갱신
-```
-
-**각 메소드 역할 요약**
-
-| 메소드 | 파일 | 역할 |
-|---|---|---|
-| `main()` | `run_multi_seed.py` | 인자 파싱, 프로세스 풀 생성, 결과 pkl 저장 |
-| `_run_single()` | `run_multi_seed.py` | 시드별 `DOBMBRLConfig` 생성 후 `train_DOB_core` 호출 |
-| `train_DOB_core()` | `trainer.py` | 전체 학습 루프 — 4개 Phase 조율, checkpoint 저장 |
-| `train_residual_dx_model_dob()` | `model_learning.py` | ResidualDxNet 학습. ablation 시 uniform sampling 사용 |
-| `train_uncertainty_rbf()` | `model_learning.py` | NormalizedRBFModel 학습 (rollout 신뢰도 추정기) |
-| `generate_samples_dob()` | `rollout.py` | 가상 rollout으로 model_buffer 채우기 |
-| `predict_next_obs_dob()` | `dob.py` | nominal + residual + DOB로 다음 상태 예측 |
-| `step_nominal_cartpole()` | `nominal.py` | 물리 방정식 기반 Euler 적분 한 스텝 |
-| `sample_mixed_minibatch()` | `rollout.py` | real 20% + model 80% 혼합 미니배치 반환 |
-| `reset_env()` / `step_env()` | `cartpole_utils.py` | Gymnasium 환경 래퍼 (5-tuple 통합 처리) |
-| `real_buffer.store()` | `buffer.py` | 실제 전이 저장 (obs, act, dhat, uncertainty 포함) |
-| `model_buffer.store_batch()` | `buffer.py` | 가상 전이 배치 저장 |
-
----
-
-## 결과 시각화
-
-```bash
-# 단일 시드
-cd cycles/Cycle_1
-python scripts/plot_results.py --log-dir ./logs --seed 1 --figures-dir ./figures
-
-# 멀티 시드
-python scripts/plot_results.py --results-dir ./results --multi-seed --figures-dir ./figures
-```
-
-**생성 파일**
-
-| 파일 | 내용 |
-|---|---|
-| `reward_curve.png` | 에피소드별 누적 reward |
-| `reward_smoothed.png` | 10 에피소드 이동 평균 reward |
-| `total_steps.png` | 누적 환경 스텝 |
-| `multiseed_mean_std.png` | 멀티 시드 mean ± std (환경 스텝 기준) |
-
----
-
-## Cycle 기반 실험 관리
-
-실험 변경 사항은 **항상 새 Cycle 폴더에서만** 수행한다. `base/`는 절대 수정하지 않는다.
-
-### 새 Cycle 생성
-
-```bash
-# base에서 시작
-bash .claude/skills/cycle-manager/scripts/create_cycle.sh --from base
-
-# 이전 Cycle에서 시작
-bash .claude/skills/cycle-manager/scripts/create_cycle.sh --from cycles/Cycle_1
-```
-
-Cycle 번호는 `cycles/` 내 기존 최대 번호 + 1로 자동 부여된다.
-
-### Cycle 폴더 구조
-
-```
-cycles/
-├── Cycle_1-dob-rl/    ← 기초 검증 (base 그대로)
-├── Cycle_2/    ← 실험 A (예: GPU 지원 추가)
-└── Cycle_3/    ← 실험 B (예: 하이퍼파라미터 튜닝)
-```
-
-각 Cycle은 독립적으로 실행되며, 이전 Cycle 결과에 영향을 주지 않는다.
-
----
-
-## 실험 이력
-
-`experiments_log.md`에 Cycle별 실험 이력이 기록된다.
-
----
-
-## 주요 설계 원칙
-
-1. **`base/` 수정 금지** — 사용자가 명시적으로 허가한 경우에만 가능
-2. **`base/original/` 절대 수정 금지** — 원본 MATLAB 이식본, 참조용 읽기만 허용
-3. **모든 코드 변경은 `cycles/Cycle_N/` 내에서만**
-4. **1 figure = 1 파일** — `plt.subplots()`는 항상 단일 Axes `(1, 1)`, subplot 금지
-5. **`config.py` 수정은 파일 직접 편집** — CLI override 없음
+| 항목 | 값 | 항목 | 값 |
+|---|---:|---|---:|
+| 전체 환경 step | 125,000 | Real data ratio | 0.05 |
+| Warm start | 5,000 | DOB weight `dob_w` | 0.1 |
+| Batch size | 256 | RBF centers / width | 3,000 / 0.5 |
+| SAC gradient steps / env step | 5 | Uncertainty threshold | 1.5 |
+| Actor·Critic lr | 3e-4 | Rollout batch size | 100,000 |
+| Residual lr | 1e-3 | Rollout horizon | 15 |
+| Discount `γ` / `τ` | 0.99 / 0.005 | Model 학습·rollout 주기 | 250 step |
